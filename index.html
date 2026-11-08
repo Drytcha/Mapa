@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Darmowy planer tras autobusowych, godzin przejazdu i eksportu PDF."
+    />
+    <meta name="application-name" content="MapPlaner" />
+    <meta name="theme-color" content="#0d4f3b" />
+    <title>MapPlaner — planer tras i PDF</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d4f3b'/%3E%3Cpath d='M9 23V14a5 5 0 0 1 5-5h7' stroke='%23d7f36e' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='23' r='2.5' fill='%23d7f36e'/%3E%3Ccircle cx='23' cy='9' r='2.5' fill='%23d7f36e'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <script>
+      try {
+        if (localStorage.getItem("mapplaner.theme") === "dark") {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (error) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
