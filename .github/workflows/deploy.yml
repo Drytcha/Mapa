@@ -29,13 +29,26 @@ jobs:
 
       - run: npm install
 
-      - run: npm run build
+      - name: Budowanie strony
+        run: |
+          if grep -q '"vite"' package.json; then
+            npm run build -- --base=/Mapa/
+          else
+            npm run build
+          fi
+
+      - name: Wybór katalogu z wynikiem budowy
+        run: |
+          if [ -d dist ]; then echo "BUILD_DIR=dist" >> "$GITHUB_ENV"
+          elif [ -d build ]; then echo "BUILD_DIR=build" >> "$GITHUB_ENV"
+          elif [ -d out ]; then echo "BUILD_DIR=out" >> "$GITHUB_ENV"
+          else echo "Nie znaleziono dist/, build/ ani out/ — sprawdz npm run build"; exit 1; fi
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: ${{ env.BUILD_DIR }}
 
       - id: deployment
         uses: actions/deploy-pages@v4
