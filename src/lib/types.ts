@@ -3,22 +3,12 @@ export type MapStyle = "osm" | "light" | "dark" | "satellite";
 export type ThemeMode = "light" | "dark";
 export type SpeedOverrides = Partial<Record<VehicleId, number>>;
 
-export interface TrafficSignalIntersection {
-  id: string;
-  lat: number;
-  lon: number;
-  routeOffsetMeters: number;
-}
-
 export interface ScheduleSettings {
   mode: "now" | "departure" | "arrival";
   date: string;
   time: string;
   trafficEnabled: boolean;
   peakDelayPercent: number;
-  liveTrafficEnabled: boolean;
-  trafficLightsEnabled: boolean;
-  secondsPerSignal: number;
   bufferMinutes: number;
   occurrence: "earlier" | "later";
 }
@@ -30,14 +20,10 @@ export interface JourneyTiming {
   arrival: number;
   targetArrival?: number;
   baseSeconds: number;
-  signalCount: number;
-  signalSeconds: number;
   travelSeconds: number;
   delaySeconds: number;
   bufferSeconds: number;
   trafficEnabled: boolean;
-  liveTrafficEnabled: boolean;
-  trafficLightsEnabled: boolean;
   peakDelayPercent: number;
 }
 
@@ -75,18 +61,19 @@ export interface BusStop {
   lines: string[];
   shelter: boolean;
   operator?: string;
+  /** OSM reference of a platform/bay: distinguishes directions at the same named stop. */
   ref?: string;
   direction?: string;
   towards?: string;
   side?: string;
+  /** Normalised OSM bay/direction key used only to tell opposite platforms apart. */
   platformKey?: string;
+  /** How this stop is mapped in OSM; the platform position is the most precise. */
   kind?: "platform" | "bus_stop" | "stop_position";
+  /** OSM element kinds recognised as the same physical platform. */
   kinds?: Array<"platform" | "bus_stop" | "stop_position">;
+  /** Number of OSM elements merged into this single physical stop. */
   merged?: number;
-  /** GTFS stop id used to read departures / kursówki for this stop. */
-  gtfsId?: string;
-  /** Where the stop comes from: Wałbrzych timetable (GTFS + rozklad.walbrzych.eu) or OpenStreetMap only. */
-  source?: "timetable" | "osm";
 }
 
 export interface RouteStep {
@@ -109,6 +96,7 @@ export interface RouteData {
   distance: number;
   duration: number;
   steps: RouteStep[];
+  /** Original routing totals for each consecutive pair of waypoints. */
   legs?: RouteLeg[];
   engine: "osrm" | "demo";
   labels: string[];
@@ -166,51 +154,4 @@ export interface ProfileMetrics {
   customSpeed?: number;
   automaticDuration: number;
   journey?: JourneyTiming;
-}
-
-export type WalbrzychOperatorKey = "mzuk" | "ska" | "other";
-
-export interface LiveBusVehicle {
-  vehicleId: string;
-  model: string | null;
-  operatorKey: WalbrzychOperatorKey;
-  operatorName: string;
-  /** "manual" when the assignment was overridden by the user. */
-  operatorSource: "auto" | "manual";
-  routeName: string;
-  routeColor: string;
-  brigade: string;
-  kursowka: string;
-  tripId: string | null;
-  lat: number;
-  lon: number;
-  bearing: number | null;
-  delaySeconds: number;
-  /** Speed derived from consecutive GPS fixes; null until two fixes are known. */
-  speedKmh: number | null;
-  headsign: string | null;
-  timestamp: number;
-  upcomingStops: Array<{
-    sequence: number;
-    name: string;
-    scheduledArrival: number;
-    scheduledDeparture: number;
-  }>;
-}
-
-export interface LiveTrafficSummary {
-  totalVehicles: number;
-  trackedOnTripCount: number;
-  avgDelaySeconds: number;
-  maxDelaySeconds: number;
-  delayedCount: number;
-  onTimeCount: number;
-  congestionLevel: "niski" | "umiarkowany" | "wysoki";
-  recommendedPeakPercent: number;
-  operatorBreakdown: {
-    mzuk: number;
-    ska: number;
-    other: number;
-  };
-  fetchedAt: number;
 }

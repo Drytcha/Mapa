@@ -1,33 +1,28 @@
-"use client";
-
-import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { KursowkaShapeOverlay, MapHandle } from "./MapView";
-import PlanningPanel from "./PlanningPanel";
-import TopBar from "./TopBar";
-import KursowkiDialog from "./KursowkiDialog";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MapView, { type MapHandle } from "./components/MapView";
+import PlanningPanel from "./components/PlanningPanel";
+import TopBar from "./components/TopBar";
 import {
   BusStopCard,
-  LiveBusCard,
-  LiveFleetControl,
-  MapContextMenu,
   MapControls,
-  MapDrawingBanner,
+  MapContextMenu,
   MapRouteCard,
   MobilePlannerSheet,
   NavigationHud,
   PickBanner,
   QuickComparison,
-} from "./MapOverlays";
+  MapDrawingBanner,
+} from "./components/MapOverlays";
 import {
   FleetDialog,
   ReportDialog,
   SettingsDialog,
   StepsDrawer,
   Toast,
-} from "./Modals";
-import PdfExportDialog from "./PdfExportDialog";
-import { APP_NAME } from "@/config/branding";
+} from "./components/Modals";
+import { MAX_WAYPOINTS } from "./lib/types";
+import PdfExportDialog from "./components/PdfExportDialog";
+import { APP_NAME } from "./config/branding";
 import {
   cleanBrigade,
   formatBrigadeTitle,
@@ -37,45 +32,31 @@ import {
   persistSavedBrigades,
   saveBrigade,
   type SavedBrigadePlan,
-} from "@/lib/brigade";
+} from "./lib/brigade";
 import {
   createEmptyWaypoint,
   createInitialWaypoints,
   DEFAULT_BUS_SPEED,
   EMPTY_ROUTE,
   isWaypointSet,
-} from "@/lib/data";
-import {
-  fetchBusStops,
-  filterStops,
-  stopDisplayName,
-  WALBRZYCH_BOUNDS,
-  WALBRZYCH_CENTER,
-  WALBRZYCH_ZOOM,
-  type Bounds,
-} from "@/lib/busStops";
+} from "./lib/data";
+import { fetchBusStops, filterStops, stopDisplayName, WALBRZYCH_BOUNDS, WALBRZYCH_CENTER, WALBRZYCH_ZOOM, type Bounds } from "./lib/busStops";
 import {
   buildComparisons,
   currentStepForProgress,
-  estimateAverageSpeed,
   fetchRoute,
   formatDistance,
   formatDuration,
+  isValidSpeed,
+  scaleRouteTimes,
+  estimateAverageSpeed,
   haversine,
   insertionSlot,
-  isValidSpeed,
   pointAtProgress,
-  reverseGeocode,
-  scaleRouteTimes,
   stopsAlongRoute,
-} from "@/lib/geo";
-import {
-  calculateJourney,
-  defaultSchedule,
-  scheduleSummaryLines,
-  SCHEDULE_STORAGE_KEY,
-  withJourney,
-} from "@/lib/schedule";
+  reverseGeocode,
+} from "./lib/geo";
+import { calculateJourney, defaultSchedule, scheduleSummaryLines, SCHEDULE_STORAGE_KEY, withJourney } from "./lib/schedule";
 import {
   buildPlanKey,
   buildSnapshot,
@@ -86,30 +67,23 @@ import {
   SPEEDS_KEY,
   writeSnapshot,
   type LastRouteSnapshot,
-} from "@/lib/lastRoute";
-import { FLEET_STORAGE_KEY, replaceFleet } from "@/lib/fleet";
-import {
-  MAX_WAYPOINTS,
-  type AvoidOptions,
-  type BrigadeInfo,
-  type BusStop,
-  type LiveBusVehicle,
-  type LiveTrafficSummary,
-  type MapStyle,
-  type Place,
-  type RouteData,
-  type RouteStep,
-  type ScheduleSettings,
-  type SpeedOverrides,
-  type ThemeMode,
-  type TrafficSignalIntersection,
-  type VehicleId,
-  type VehicleProfile,
-  type WalbrzychOperatorKey,
-  type Waypoint,
-} from "@/lib/types";
-
-const MapView = dynamic(() => import("./MapView"), { ssr: false });
+} from "./lib/lastRoute";
+import { FLEET_STORAGE_KEY, replaceFleet } from "./lib/fleet";
+import type {
+  AvoidOptions,
+  BrigadeInfo,
+  BusStop,
+  MapStyle,
+  Place,
+  RouteData,
+  RouteStep,
+  ScheduleSettings,
+  SpeedOverrides,
+  ThemeMode,
+  VehicleId,
+  VehicleProfile,
+  Waypoint,
+} from "./lib/types";
 
 const THEME_STORAGE_KEY = "mapplaner.theme";
 
@@ -120,14 +94,13 @@ interface MapContextMenuState {
   top: number;
 }
 
-const waypointId = () =>
-  `wp-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+const waypointId = () => `wp-${globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 
 function loadTheme(): ThemeMode {
   try {
-    return typeof window !== "undefined" && localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+    return localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
   } catch {
-    return "dark";
+    return "light";
   }
 }
 
@@ -152,59 +125,30 @@ const copyToClipboard = async (text: string) => {
   }
 };
 
-const subscribeToHydration = () => () => {};
-
-export default function MapPlanerApp() {
-  const mounted = useSyncExternalStore(subscribeToHydration, () => true, () => false);
-  if (!mounted) {
-    return (
-      <div className="flex h-[100dvh] items-center justify-center bg-canvas text-ink" role="status">
-        <div className="text-center">
-          <p className="text-xl font-extrabold tracking-tight">MapPlaner</p>
-          <p className="mt-2 text-xs text-mute">Ładowanie mapy i kursówek Wałbrzych…</p>
-        </div>
-      </div>
-    );
-  }
-  return <MapPlanerWorkspace />;
-}
-
-function MapPlanerWorkspace() {
+export default function App() {
   const [boot] = useState<LastRouteSnapshot | null>(() => loadLastRoute());
   const initialWaypoints = boot?.waypoints ?? createInitialWaypoints();
   const [fleet, setFleet] = useState<VehicleProfile[]>(() => replaceFleet(boot?.fleet));
-  const initialVehicle =
-    boot?.vehicle && fleet.some((item) => item.id === boot.vehicle)
-      ? boot.vehicle
-      : fleet[0]?.id ?? "";
+  const initialVehicle = boot?.vehicle && fleet.some((item) => item.id === boot.vehicle)
+    ? boot.vehicle
+    : fleet[0]?.id ?? "";
 
   const [isDesktop, setIsDesktop] = useState(() =>
-    true
+    typeof window === "undefined" ? true : window.matchMedia("(min-width: 1024px)").matches
   );
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
-  const [mapStyle, setMapStyle] = useState<MapStyle>(() => loadTheme() === "dark" ? "dark" : "light");
+  const [mapStyle, setMapStyle] = useState<MapStyle>("osm");
   const [brigade, setBrigade] = useState<BrigadeInfo>(() => boot?.brigade ?? loadBrigade());
-  const [savedBrigades, setSavedBrigades] = useState<SavedBrigadePlan[]>(() =>
-    loadSavedBrigades()
-  );
+  const [savedBrigades, setSavedBrigades] = useState<SavedBrigadePlan[]>(() => loadSavedBrigades());
   const [waypoints, setWaypoints] = useState<Waypoint[]>(initialWaypoints);
   const [vehicle, setVehicle] = useState<VehicleId>(initialVehicle);
-  const [avoid, setAvoid] = useState<AvoidOptions>(
-    boot?.avoid ?? { tolls: false, ferries: false, unpaved: false }
-  );
-  const [speeds, setSpeeds] = useState<SpeedOverrides>(
-    () => boot?.speeds ?? defaultSpeedMap(fleet)
-  );
-  const [schedule, setSchedule] = useState<ScheduleSettings>(
-    () => boot?.schedule ?? defaultSchedule()
-  );
+  const [avoid, setAvoid] = useState<AvoidOptions>(boot?.avoid ?? { tolls: false, ferries: false, unpaved: false });
+  const [speeds, setSpeeds] = useState<SpeedOverrides>(() => boot?.speeds ?? defaultSpeedMap(fleet));
+  const [schedule, setSchedule] = useState<ScheduleSettings>(() => boot?.schedule ?? defaultSchedule());
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [route, setRoute] = useState<RouteData>(() => boot?.route ?? EMPTY_ROUTE);
-  const [resolvedKey, setResolvedKey] = useState(() =>
-    boot?.route ? buildPlanKey(initialWaypoints, boot.avoid) : ""
-  );
+  const [resolvedKey, setResolvedKey] = useState(() => boot?.route ? buildPlanKey(initialWaypoints, boot.avoid) : "");
 
-  // Bus stops
   const [busStops, setBusStops] = useState<BusStop[]>([]);
   const [busLoading, setBusLoading] = useState(false);
   const [busError, setBusError] = useState("");
@@ -215,28 +159,6 @@ function MapPlanerWorkspace() {
   const [selectedStop, setSelectedStop] = useState<BusStop | null>(null);
   const [contextMenu, setContextMenu] = useState<MapContextMenuState | null>(null);
 
-  // Traffic signals along route
-  const [trafficSignals, setTrafficSignals] = useState<TrafficSignalIntersection[]>([]);
-  const [signalsLoading, setSignalsLoading] = useState(false);
-  const [showTrafficSignals, setShowTrafficSignals] = useState(true);
-
-  // Live GPS Wałbrzych buses (ZDKiUM, ŚKA, MZUK)
-  const [liveVehicles, setLiveVehicles] = useState<LiveBusVehicle[]>([]);
-  const [liveTraffic, setLiveTraffic] = useState<LiveTrafficSummary | null>(null);
-  const [liveLoading, setLiveLoading] = useState(false);
-  const [showLiveBuses, setShowLiveBuses] = useState(true);
-  const [operatorFilter, setOperatorFilter] = useState<"all" | WalbrzychOperatorKey>("all");
-  const [selectedLiveBus, setSelectedLiveBus] = useState<LiveBusVehicle | null>(null);
-
-  // Kursówki dialog & shape overlay
-  const [kursowkiOpen, setKursowkiOpen] = useState(false);
-  const [kursowkaDeepLink, setKursowkaDeepLink] = useState<{
-    id?: string | null;
-    code?: string | null;
-  }>({});
-  const [kursowkaOverlay, setKursowkaOverlay] = useState<KursowkaShapeOverlay | null>(null);
-
-  // Route editing & dialogs
   const [addMode, setAddMode] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
   const [routingError, setRoutingError] = useState("");
@@ -254,12 +176,7 @@ function MapPlanerWorkspace() {
   const [navPlaying, setNavPlaying] = useState(false);
   const [navProgress, setNavProgress] = useState(0);
   const [pickTarget, setPickTarget] = useState<string | null>(null);
-  const [focus, setFocus] = useState<{
-    lat: number;
-    lon: number;
-    zoom?: number;
-    nonce: number;
-  } | null>(null);
+  const [focus, setFocus] = useState<{ lat: number; lon: number; zoom?: number; nonce: number } | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const mapRef = useRef<MapHandle | null>(null);
@@ -269,9 +186,7 @@ function MapPlanerWorkspace() {
   const pendingFitRef = useRef(false);
   const busAbortRef = useRef<AbortController | null>(null);
   const arrivalToastRef = useRef(false);
-  const lastSavedSignatureRef = useRef(
-    boot?.route ? snapshotSignature(boot as LastRouteSnapshot) : ""
-  );
+  const lastSavedSignatureRef = useRef(boot?.route ? snapshotSignature(boot as LastRouteSnapshot) : "");
   const skipNextRouteKeyRef = useRef<string | null>(null);
 
   const waypointsRef = useRef(waypoints);
@@ -281,46 +196,6 @@ function MapPlanerWorkspace() {
 
   const showToast = useCallback((message: string) => setToastMessage(message), []);
   const closeToast = useCallback(() => setToastMessage(null), []);
-
-  // Poll live GPS Wałbrzych buses every 15s
-  const fetchLiveBuses = useCallback(async (force = false) => {
-    setLiveLoading(true);
-    try {
-      const res = await fetch(`/api/buses/live${force ? "?force=1" : ""}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const json = (await res.json()) as {
-        ok: boolean;
-        vehicles?: LiveBusVehicle[];
-        traffic?: LiveTrafficSummary | null;
-      };
-      if (json.ok && Array.isArray(json.vehicles)) {
-        setLiveVehicles(json.vehicles);
-        setLiveTraffic(json.traffic ?? null);
-        setSelectedLiveBus((prev) =>
-          prev ? json.vehicles?.find((v) => v.vehicleId === prev.vehicleId) ?? prev : null
-        );
-      }
-    } catch {
-      // Keep last known positions
-    } finally {
-      setLiveLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchLiveBuses();
-    const interval = window.setInterval(() => {
-      void fetchLiveBuses();
-    }, 10_000);
-    return () => window.clearInterval(interval);
-  }, [fetchLiveBuses]);
-
-  // Trigger initial GTFS seed check once
-  useEffect(() => {
-    void fetch("/api/gtfs/status", { cache: "no-store" }).catch(() => undefined);
-  }, []);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -341,97 +216,23 @@ function MapPlanerWorkspace() {
   const readyForRouting = waypoints.length >= 2 && waypoints.every(isWaypointSet);
   const assignedCount = useMemo(() => waypoints.filter(isWaypointSet).length, [waypoints]);
 
-  const planKey = buildPlanKey(waypoints, avoid);
-  const routeReady =
-    readyForRouting &&
-    resolvedKey === planKey &&
-    route.engine === "osrm" &&
-    !isRouting &&
-    !addMode &&
-    !routingError;
-
-  // Detect traffic signals whenever route geometry updates
-  useEffect(() => {
-    if (!routeReady || route.coords.length < 2) {
-      setTrafficSignals([]);
-      return;
-    }
-    let cancelled = false;
-    setSignalsLoading(true);
-    fetch("/api/traffic-signals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coords: route.coords }),
-    })
-      .then((res) => res.json())
-      .then((json: { ok: boolean; intersections?: TrafficSignalIntersection[] }) => {
-        if (!cancelled && json.ok && Array.isArray(json.intersections)) {
-          setTrafficSignals(json.intersections);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setTrafficSignals([]);
-      })
-      .finally(() => {
-        if (!cancelled) setSignalsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [routeReady, route.coords]);
-
-  const baseComparisons = useMemo(
-    () => buildComparisons(route, undefined, avoid, speeds),
-    [route, avoid, speeds, fleet]
-  );
-
-  const scheduleContext = useMemo(
-    () => ({
-      signalCount: trafficSignals.length,
-      liveDelayPercent: liveTraffic?.recommendedPeakPercent,
-    }),
-    [trafficSignals.length, liveTraffic?.recommendedPeakPercent]
-  );
-
-  const scheduledProfiles = useMemo(
-    () =>
-      baseComparisons.map((metric) => {
-        const evaluation = calculateJourney(metric.duration, schedule, clockNow, scheduleContext);
-        return { metric: withJourney(metric, evaluation), evaluation };
-      }),
-    [baseComparisons, schedule, clockNow, scheduleContext]
-  );
-
-  const comparisons = useMemo(
-    () => scheduledProfiles.map((item) => item.metric),
-    [scheduledProfiles]
-  );
-  const activePlan =
-    scheduledProfiles.find((item) => item.metric.id === vehicle) ?? scheduledProfiles[0];
+  const baseComparisons = useMemo(() => buildComparisons(route, undefined, avoid, speeds), [route, avoid, speeds, fleet]);
+  const scheduledProfiles = useMemo(() => baseComparisons.map((metric) => {
+    const evaluation = calculateJourney(metric.duration, schedule, clockNow);
+    return { metric: withJourney(metric, evaluation), evaluation };
+  }), [baseComparisons, schedule, clockNow]);
+  const comparisons = useMemo(() => scheduledProfiles.map((item) => item.metric), [scheduledProfiles]);
+  const activePlan = scheduledProfiles.find((item) => item.metric.id === vehicle) ?? scheduledProfiles[0];
   const metrics = activePlan.metric;
   const scheduleEvaluation = activePlan.evaluation;
 
+  const planKey = buildPlanKey(waypoints, avoid);
+  const routeReady = readyForRouting && resolvedKey === planKey && route.engine === "osrm" && !isRouting && !addMode && !routingError;
   const exportReady = routeReady && !!metrics.journey;
-  const navigationRoute = useMemo(
-    () => scaleRouteTimes(route, metrics.duration),
-    [route, metrics.duration]
-  );
+  const navigationRoute = useMemo(() => scaleRouteTimes(route, metrics.duration), [route, metrics.duration]);
   const visibleStops = useMemo(() => filterStops(busStops, busQuery), [busStops, busQuery]);
-  const visibleLiveBuses = useMemo(
-    () =>
-      operatorFilter === "all"
-        ? liveVehicles
-        : liveVehicles.filter((v) => v.operatorKey === operatorFilter),
-    [liveVehicles, operatorFilter]
-  );
-
   const usedStopKeys = useMemo(
-    () =>
-      new Set(
-        waypoints
-          .filter(isWaypointSet)
-          .map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`)
-      ),
+    () => new Set(waypoints.filter(isWaypointSet).map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`)),
     [waypoints]
   );
   const nearRoute = useMemo(() => {
@@ -442,45 +243,26 @@ function MapPlanerWorkspace() {
   }, [busStops, route.coords, routeReady]);
   const nearRouteIds = useMemo(() => new Set(nearRoute.keys()), [nearRoute]);
   const selectedStopInRoute = Boolean(
-    selectedStop &&
-      usedStopKeys.has(`${selectedStop.lat.toFixed(5)},${selectedStop.lon.toFixed(5)}`)
+    selectedStop && usedStopKeys.has(`${selectedStop.lat.toFixed(5)},${selectedStop.lon.toFixed(5)}`)
   );
 
-  const makeSnapshot = (): LastRouteSnapshot =>
-    buildSnapshot({
-      waypoints,
-      vehicle,
-      fleet,
-      speeds,
-      schedule,
-      avoid,
-      brigade,
-      route,
-    });
+  const makeSnapshot = (): LastRouteSnapshot => buildSnapshot({
+    waypoints, vehicle, fleet, speeds, schedule, avoid, brigade, route,
+  });
 
   useEffect(() => {
     replaceFleet(fleet);
-    try {
-      localStorage.setItem(FLEET_STORAGE_KEY, JSON.stringify(fleet));
-    } catch {
-      /* Storage optional */
-    }
+    try { localStorage.setItem(FLEET_STORAGE_KEY, JSON.stringify(fleet)); } catch { /* Storage is optional. */ }
   }, [fleet]);
 
   useEffect(() => {
     try {
       localStorage.setItem(SPEEDS_KEY, JSON.stringify(cleanSpeeds(speeds, fleet)));
-    } catch {
-      /* Storage optional */
-    }
+    } catch { /* Storage is optional. */ }
   }, [speeds, fleet]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(schedule));
-    } catch {
-      /* Storage optional */
-    }
+    try { localStorage.setItem(SCHEDULE_STORAGE_KEY, JSON.stringify(schedule)); } catch { /* Storage is optional. */ }
   }, [schedule]);
 
   useEffect(() => {
@@ -496,6 +278,7 @@ function MapPlanerWorkspace() {
     return () => window.clearInterval(timer);
   }, []);
 
+  // Automatic persistence only after a successful route, never for a draft or a failed response.
   useEffect(() => {
     if (!routeReady || addMode) return;
     const snapshot = makeSnapshot();
@@ -503,9 +286,11 @@ function MapPlanerWorkspace() {
     if (signature === lastSavedSignatureRef.current) return;
     lastSavedSignatureRef.current = signature;
     writeSnapshot(snapshot);
+    // makeSnapshot is derived from the listed values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeReady, addMode, planKey, route, waypoints, vehicle, fleet, speeds, schedule, avoid, brigade]);
 
+  /* Render the planner only once: sidebar on desktop, bottom sheet on mobile. */
   useEffect(() => {
     const query = window.matchMedia("(min-width: 1024px)");
     const handleChange = (event: MediaQueryListEvent) => {
@@ -517,9 +302,9 @@ function MapPlanerWorkspace() {
     return () => query.removeEventListener("change", handleChange);
   }, []);
 
+  /* Theme is a real app-level theme, shared with the map basemap. */
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    document.documentElement.style.colorScheme = theme;
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {
@@ -527,11 +312,9 @@ function MapPlanerWorkspace() {
     }
   }, [theme]);
 
+  /* Collect map clicks first, then submit complete, cancellable route batches. */
   useEffect(() => {
-    if (addMode) {
-      setIsRouting(false);
-      return;
-    }
+    if (addMode) { setIsRouting(false); return; }
     if (!readyForRouting) {
       requestIdRef.current += 1;
       setIsRouting(false);
@@ -545,6 +328,8 @@ function MapPlanerWorkspace() {
       setIsRouting(false);
       return;
     }
+    // StrictMode mounts effects twice; compare the saved plan key instead of consuming a flag.
+    // A manual recalculation (refreshTick > 0) or a changed route still calls OSRM.
     if (boot?.route && boot.planKey === planKey && refreshTick === 0) {
       setIsRouting(false);
       return;
@@ -554,11 +339,7 @@ function MapPlanerWorkspace() {
     setIsRouting(true);
     setRoutingError("");
     const timer = window.setTimeout(() => {
-      fetchRoute({
-        waypoints: waypointsRef.current,
-        avoid: avoidRef.current,
-        signal: controller.signal,
-      })
+      fetchRoute({ waypoints: waypointsRef.current, avoid: avoidRef.current, signal: controller.signal })
         .then((data) => {
           if (controller.signal.aborted || requestId !== requestIdRef.current) return;
           setRoute(data);
@@ -570,24 +351,16 @@ function MapPlanerWorkspace() {
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted || requestId !== requestIdRef.current) return;
-          setRoutingError(
-            error instanceof Error
-              ? error.message
-              : "Nie udało się pobrać trasy. Spróbuj ponownie."
-          );
+          setRoutingError(error instanceof Error ? error.message : "Nie udało się pobrać trasy. Spróbuj ponownie.");
         })
         .finally(() => {
-          if (!controller.signal.aborted && requestId === requestIdRef.current) {
-            setIsRouting(false);
-          }
+          if (!controller.signal.aborted && requestId === requestIdRef.current) setIsRouting(false);
         });
-    }, 650);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [planKey, refreshTick, addMode, readyForRouting, boot]);
+    }, 900);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [planKey, refreshTick, addMode, readyForRouting]);
 
+  /* Navigation playback. */
   useEffect(() => {
     if (!navActive || !navPlaying) return;
     const interval = window.setInterval(() => {
@@ -613,18 +386,15 @@ function MapPlanerWorkspace() {
   }, []);
 
   const startNavigation = useCallback(() => {
-    if (!exportReady) {
-      showToast("Najpierw wyznacz aktualną trasę i podaj poprawny termin.");
-      return;
-    }
+    if (!exportReady) { showToast("Najpierw wyznacz aktualną trasę i podaj poprawny termin."); return; }
     arrivalToastRef.current = false;
     setNavProgress(0);
     setNavActive(true);
     setNavPlaying(true);
     setMobileExpanded(false);
     const start = waypointsRef.current[0];
-    if (isWaypointSet(start)) mapRef.current?.centerOn(start.lat, start.lon, 13);
-    showToast("Podgląd nawigacji uruchomiony.");
+    if (isWaypointSet(start)) mapRef.current?.centerOn(start.lat, start.lon, 10);
+    showToast("Podgląd nawigacji uruchomiony. Możesz wstrzymać lub zakończyć w panelu na mapie.");
   }, [showToast, exportReady]);
 
   const toggleNavigation = useCallback(() => {
@@ -635,6 +405,7 @@ function MapPlanerWorkspace() {
     setNavPlaying((current) => !current);
   }, [navActive, startNavigation]);
 
+  /* Bus stops come from the free Overpass API, fetched once per bounding box. */
   const loadBusStops = useCallback(async (bounds: Bounds, scope: string, force = false) => {
     busAbortRef.current?.abort();
     const controller = new AbortController();
@@ -652,15 +423,15 @@ function MapPlanerWorkspace() {
       setBusStops(stops);
       setBusScope(scope);
       if (!stops.length) {
-        setBusError("Brak przystanków autobusowych w tym obszarze.");
+        setBusError("OpenStreetMap nie zawiera przystanków autobusowych w tym obszarze.");
       }
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof DOMException && error.name === "AbortError") return;
       setBusError(
-        error instanceof Error
+        error instanceof Error && error.message.startsWith("Nie udało") || error instanceof Error && error.message.startsWith("Publiczny")
           ? error.message
-          : "Nie udało się pobrać przystanków."
+          : "Nie udało się pobrać przystanków. Publiczny Overpass bywa przeciążony - spróbuj ponownie."
       );
     } finally {
       if (!controller.signal.aborted) setBusLoading(false);
@@ -677,7 +448,7 @@ function MapPlanerWorkspace() {
     if (!bounds) return;
     const area = (bounds.north - bounds.south) * (bounds.east - bounds.west);
     if (area > 0.6) {
-      showToast("Zbyt duży obszar dla Overpass. Przybliż mapę do miasta lub regionu.");
+      showToast("Zbyt duży obszar dla darmowego Overpass. Przybliż mapę do miasta lub regionu.");
       return;
     }
     setSelectedStop(null);
@@ -685,7 +456,6 @@ function MapPlanerWorkspace() {
   }, [loadBusStops, showToast]);
 
   const selectBusStop = useCallback((stop: BusStop, center: boolean) => {
-    setSelectedLiveBus(null);
     setSelectedStop((current) => (current?.id === stop.id ? null : stop));
     if (center) mapRef.current?.centerOn(stop.lat, stop.lon, 16);
   }, []);
@@ -713,10 +483,9 @@ function MapPlanerWorkspace() {
       };
       setWaypoints((list) => {
         if (effectiveRole === "start") return [{ ...point, id: list[0].id }, ...list.slice(1)];
-        if (effectiveRole === "end") {
-          return [...list.slice(0, -1), { ...point, id: list[list.length - 1].id }];
-        }
+        if (effectiveRole === "end") return [...list.slice(0, -1), { ...point, id: list[list.length - 1].id }];
         const next = [...list];
+        // Place the stop where it belongs along the route, not simply before the finish.
         const slot =
           routeReady && route.coords.length > 1
             ? insertionSlot(route, list, [stop.lat, stop.lon])
@@ -745,14 +514,10 @@ function MapPlanerWorkspace() {
     }
     const near = stopsAlongRoute(busStops, route.coords, 70);
     if (!near.length) {
-      showToast("Nie znaleziono przystanków przy wyznaczonej trasie.");
+      showToast("Przy tej trasie nie ma przystanków w promieniu 70 m.");
       return;
     }
-    const used = new Set(
-      current
-        .filter(isWaypointSet)
-        .map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`)
-    );
+    const used = new Set(current.filter(isWaypointSet).map((point) => `${point.lat.toFixed(5)},${point.lon.toFixed(5)}`));
     const working = [...current];
     let offset = 0;
     let added = 0;
@@ -785,7 +550,9 @@ function MapPlanerWorkspace() {
     showToast(
       added === 1
         ? "Dodano 1 przystanek przy trasie."
-        : `Dodano ${added} przystanków w kolejności przejazdu.`
+        : `Dodano ${added} przystanków w kolejności przejazdu${
+            working.length >= MAX_WAYPOINTS ? ` (limit ${MAX_WAYPOINTS} punktów)` : ""
+          }.`
     );
   }, [busStops, route, routeReady, showToast, stopNavigation]);
 
@@ -841,7 +608,6 @@ function MapPlanerWorkspace() {
     const menuWidth = 284;
     const menuHeight = 136;
     setSelectedStop(null);
-    setSelectedLiveBus(null);
     setPickTarget(null);
     setAddMode(false);
     setContextMenu({
@@ -865,7 +631,7 @@ function MapPlanerWorkspace() {
     setMobileExpanded(false);
     updateCoordinate(endpoint.id, lat, lon, { fit: true, resolveAddress: false });
     showToast(
-      `${role === "start" ? "Miejsce startowe" : "Miejsce końcowe"} ustawione.`
+      `${role === "start" ? "Miejsce startowe" : "Miejsce końcowe"} ustawione: ${lat.toFixed(6)}, ${lon.toFixed(6)}.`
     );
   };
 
@@ -905,10 +671,7 @@ function MapPlanerWorkspace() {
   const handleToggleAddMode = () => {
     stopNavigation();
     setPickTarget(null);
-    if (!addMode && waypoints.length >= MAX_WAYPOINTS) {
-      showToast(`Limit to ${MAX_WAYPOINTS} punktów.`);
-      return;
-    }
+    if (!addMode && waypoints.length >= MAX_WAYPOINTS) { showToast(`Limit to ${MAX_WAYPOINTS} punktów.`); return; }
     setAddMode((current) => !current);
     setMobileExpanded(false);
   };
@@ -928,10 +691,7 @@ function MapPlanerWorkspace() {
 
   const handleMapClick = (lat: number, lon: number) => {
     setContextMenu(null);
-    if (addMode) {
-      appendMapPoint(lat, lon);
-      return;
-    }
+    if (addMode) { appendMapPoint(lat, lon); return; }
     if (!pickTarget) return;
     const stop = nearestStop(lat, lon, 40);
     if (stop) {
@@ -951,24 +711,15 @@ function MapPlanerWorkspace() {
   };
 
   const handleLineClick = (point: [number, number]) => {
-    if (addMode || pickTarget) {
-      handleMapClick(point[0], point[1]);
-      return;
-    }
-    if (!routeReady) {
-      showToast("Poczekaj na trasę lub włącz zaznaczanie wielu punktów.");
-      return;
-    }
+    if (addMode || pickTarget) { handleMapClick(point[0], point[1]); return; }
+    if (!routeReady) { showToast("Poczekaj na trasę lub włącz zaznaczanie wielu punktów."); return; }
     const slot = insertionSlot(route, waypoints, point);
     appendMapPoint(point[0], point[1], slot);
     showToast("Dodano punkt pośredni. Przeciągnij pinezkę, aby go przesunąć.");
   };
 
   const handleAddVia = () => {
-    if (waypoints.length >= MAX_WAYPOINTS) {
-      showToast(`Limit to ${MAX_WAYPOINTS} punktów.`);
-      return;
-    }
+    if (waypoints.length >= MAX_WAYPOINTS) { showToast(`Limit to ${MAX_WAYPOINTS} punktów.`); return; }
     setAddMode(false);
     stopNavigation();
     const previous = waypoints[waypoints.length - 2] ?? waypoints[0];
@@ -979,14 +730,8 @@ function MapPlanerWorkspace() {
       id: waypointId(),
       label: "Nowy punkt pośredni — kliknij mapę",
       short: "Nowy punkt",
-      lat:
-        prevSet && destSet
-          ? (prevSet.lat + destSet.lat) / 2
-          : (prevSet?.lat ?? destSet?.lat ?? WALBRZYCH_CENTER[0]),
-      lon:
-        prevSet && destSet
-          ? (prevSet.lon + destSet.lon) / 2
-          : (prevSet?.lon ?? destSet?.lon ?? WALBRZYCH_CENTER[1]),
+      lat: prevSet && destSet ? (prevSet.lat + destSet.lat) / 2 : (prevSet?.lat ?? destSet?.lat ?? WALBRZYCH_CENTER[0]),
+      lon: prevSet && destSet ? (prevSet.lon + destSet.lon) / 2 : (prevSet?.lon ?? destSet?.lon ?? WALBRZYCH_CENTER[1]),
     };
     setWaypoints((current) => {
       const next = [...current];
@@ -1021,7 +766,6 @@ function MapPlanerWorkspace() {
     setRoutingError("");
     setRoute(EMPTY_ROUTE);
     setResolvedKey("");
-    setTrafficSignals([]);
     setWaypoints(createInitialWaypoints());
     showToast("Trasa wyczyszczona.");
   };
@@ -1109,11 +853,7 @@ function MapPlanerWorkspace() {
       const next = cleanSpeeds(current, cleaned);
       for (const item of cleaned) {
         const prev = previousMap.get(item.id);
-        if (
-          !prev ||
-          Math.abs(prev.averageSpeed - item.averageSpeed) >= 0.05 ||
-          next[item.id] === undefined
-        ) {
+        if (!prev || Math.abs(prev.averageSpeed - item.averageSpeed) >= 0.05 || next[item.id] === undefined) {
           next[item.id] = item.averageSpeed ?? DEFAULT_BUS_SPEED;
         }
       }
@@ -1125,16 +865,12 @@ function MapPlanerWorkspace() {
     if (!isValidSpeed(nextSpeed)) return;
     const rounded = Math.round(nextSpeed * 10) / 10;
     const updatedFleet = replaceFleet(
-      fleet.map((item) =>
-        item.id === targetVehicleId ? { ...item, averageSpeed: rounded } : item
-      )
+      fleet.map((item) => (item.id === targetVehicleId ? { ...item, averageSpeed: rounded } : item))
     );
     setFleet(updatedFleet);
     setSpeeds((current) => ({ ...current, [targetVehicleId]: rounded }));
     const found = updatedFleet.find((item) => item.id === targetVehicleId);
-    showToast(
-      `Przypisano ${rounded.toLocaleString("pl-PL")} km/h na stałe do wozu ${found?.short ?? ""}.`
-    );
+    showToast(`Przypisano ${rounded.toLocaleString("pl-PL")} km/h na stałe do wozu ${found?.short ?? ""}.`);
   };
 
   const handleAvoidChange = (next: AvoidOptions) => {
@@ -1162,7 +898,7 @@ function MapPlanerWorkspace() {
       lastSavedSignatureRef.current = snapshotSignature(snapshot);
       showToast("Ostatnia wyznaczona trasa zapisana w tej przeglądarce.");
     } else {
-      showToast("Nie udało się zapisać trasy.");
+      showToast("Nie udało się zapisać trasy — pamięć przeglądarki jest niedostępna.");
     }
   };
 
@@ -1190,9 +926,7 @@ function MapPlanerWorkspace() {
       route,
       savedAt: new Date().toISOString(),
     };
-    setSavedBrigades((current) =>
-      [plan, ...current.filter((item) => item.id !== plan.id)].slice(0, 30)
-    );
+    setSavedBrigades((current) => [plan, ...current.filter((item) => item.id !== plan.id)].slice(0, 30));
     showToast(`Zapisano brygadę: ${title}.`);
   };
 
@@ -1205,9 +939,7 @@ function MapPlanerWorkspace() {
     if (plan.fleet?.length) {
       const restored = replaceFleet(plan.fleet);
       setFleet(restored);
-      setVehicle(
-        restored.some((item) => item.id === plan.vehicle) ? plan.vehicle : restored[0].id
-      );
+      setVehicle(restored.some((item) => item.id === plan.vehicle) ? plan.vehicle : restored[0].id);
     } else if (fleet.some((item) => item.id === plan.vehicle)) {
       setVehicle(plan.vehicle);
     }
@@ -1232,80 +964,8 @@ function MapPlanerWorkspace() {
     showToast("Usunięto zapisaną brygadę.");
   };
 
-  const handleOpenKursowkaFromItem = useCallback((kursowkaId: string, kursowkaCode: string) => {
-    setKursowkaDeepLink({ id: kursowkaId || null, code: kursowkaCode || null });
-    setKursowkiOpen(true);
-  }, []);
-
-  const handleSelectBus = useCallback((bus: LiveBusVehicle) => {
-    setOperatorFilter("all");
-    setShowLiveBuses(true);
-    setSelectedStop(null);
-    setSelectedLiveBus(bus);
-    setKursowkiOpen(false);
-    setMobileExpanded(false);
-    mapRef.current?.centerOn(bus.lat, bus.lon, 16);
-  }, []);
-
-  const handleSetOperator = useCallback(
-    async (vehicleId: string, key: WalbrzychOperatorKey | null) => {
-      try {
-        const res = await fetch("/api/buses/operator", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ vehicleId, operatorKey: key }),
-        });
-        const json = (await res.json()) as { ok: boolean; error?: string };
-        if (!res.ok || !json.ok) throw new Error(json.error || "Nie udało się zapisać przypisania.");
-        await fetchLiveBuses(true);
-        const names = { mzuk: "MZUK", ska: "ŚKA", other: "Inny" } as const;
-        showToast(
-          key
-            ? `Wóz #${vehicleId} przypisano do: ${names[key]}.`
-            : `Wóz #${vehicleId}: przywrócono automatyczne przypisanie.`
-        );
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : "Nie udało się zapisać przypisania.");
-      }
-    },
-    [fetchLiveBuses, showToast]
-  );
-
-  const handleLoadTripToPlanner = useCallback(
-    (payload: {
-      line: string;
-      duty: string;
-      waypoints: Waypoint[];
-      departureTime?: string;
-      headsign?: string;
-    }) => {
-      stopNavigation();
-      setAddMode(false);
-      setPickTarget(null);
-      setRoutingError("");
-      setBrigade({ line: payload.line, duty: payload.duty });
-      setWaypoints(payload.waypoints);
-      if (payload.departureTime) {
-        setSchedule((prev) => ({
-          ...prev,
-          mode: "departure",
-          time: payload.departureTime!,
-        }));
-      }
-      pendingFitRef.current = true;
-      setMobileExpanded(false);
-      showToast(
-        `Wczytano kurs kursówki ${payload.duty} (${payload.headsign || payload.waypoints.length + " przyst."}) do Planera.`
-      );
-    },
-    [stopNavigation, showToast]
-  );
-
   const handleShare = async () => {
-    if (!exportReady || !metrics.journey) {
-      showToast("Wyznacz trasę i sprawdź datę przed kopiowaniem planu.");
-      return;
-    }
+    if (!exportReady || !metrics.journey) { showToast("Wyznacz trasę i sprawdź datę przed kopiowaniem planu."); return; }
     const profile = metrics.profile?.name ?? metrics.name ?? vehicle;
     const brigadeTitle = formatBrigadeTitle(brigade);
     const text = [
@@ -1319,7 +979,7 @@ function MapPlanerWorkspace() {
       window.location.href,
     ].join("\n");
     const copied = await copyToClipboard(text);
-    showToast(copied ? "Podsumowanie trasy skopiowane do schowka." : "Nie udało się skopiować.");
+    showToast(copied ? "Podsumowanie trasy skopiowane do schowka." : "Nie udało się skopiować podsumowania.");
   };
 
   const handleSpeedChange = (speed: number | undefined) => {
@@ -1339,14 +999,8 @@ function MapPlanerWorkspace() {
   };
 
   const openPdf = () => {
-    if (!routeReady) {
-      showToast("Zakończ zaznaczanie i poczekaj na aktualną trasę przed eksportem.");
-      return;
-    }
-    if (!metrics.journey) {
-      showToast("Popraw datę i godzinę w planie przejazdu przed eksportem.");
-      return;
-    }
+    if (!routeReady) { showToast("Zakończ zaznaczanie i poczekaj na aktualną trasę przed eksportem."); return; }
+    if (!metrics.journey) { showToast("Popraw datę i godzinę w planie przejazdu przed eksportem."); return; }
     setPdfOpen(true);
   };
 
@@ -1368,7 +1022,7 @@ function MapPlanerWorkspace() {
   const toggleTheme = () => {
     const next = theme === "light" ? "dark" : "light";
     setTheme(next);
-    if (mapStyle !== "satellite") {
+    if (mapStyle === "light" || mapStyle === "dark") {
       setMapStyle(next === "dark" ? "dark" : "light");
     }
   };
@@ -1386,9 +1040,7 @@ function MapPlanerWorkspace() {
   const hudRemainingDistance = navActive
     ? metrics.distance * (1 - navProgress)
     : hudStep?.distance ?? 0;
-  const hudRemainingTime = navActive
-    ? metrics.duration * (1 - navProgress)
-    : hudStep?.duration ?? 0;
+  const hudRemainingTime = navActive ? metrics.duration * (1 - navProgress) : hudStep?.duration ?? 0;
   const navCoord = useMemo<[number, number] | null>(
     () => (navActive ? pointAtProgress(route, navProgress) : null),
     [navActive, route, navProgress]
@@ -1414,9 +1066,6 @@ function MapPlanerWorkspace() {
     schedule,
     scheduleEvaluation,
     clockNow,
-    signalCount: trafficSignals.length,
-    signalsLoading,
-    liveTraffic,
     onScheduleChange: handleScheduleChange,
     speeds,
     addMode,
@@ -1463,7 +1112,6 @@ function MapPlanerWorkspace() {
     onAddBusStop: (stop: BusStop) => addBusStop(stop, "via"),
     onAddStopsAlongRoute: addStopsAlongRoute,
     onCenterWalbrzych: centerWalbrzych,
-    onOpenKursowka: handleOpenKursowkaFromItem,
   };
 
   return (
@@ -1473,10 +1121,6 @@ function MapPlanerWorkspace() {
         isRouting={isRouting}
         routeReady={routeReady}
         theme={theme}
-        liveBusCount={liveVehicles.length}
-        showLiveBuses={showLiveBuses}
-        kursowkiOpen={kursowkiOpen}
-        onToggleLiveBuses={() => setShowLiveBuses((c) => !c)}
         onToggleTheme={toggleTheme}
         onOpenPdf={openPdf}
         pdfDisabled={!exportReady}
@@ -1484,12 +1128,7 @@ function MapPlanerWorkspace() {
         onOpenSteps={() => setStepsOpen(true)}
         onOpenFleet={() => setFleetOpen(true)}
         onOpenReport={() => setReportOpen(true)}
-        onOpenKursowki={() => {
-          setKursowkaDeepLink({});
-          setKursowkiOpen(true);
-        }}
         onOpenPlanner={() => {
-          setKursowkiOpen(false);
           if (window.innerWidth < 1024) setMobileExpanded(true);
         }}
       />
@@ -1501,10 +1140,7 @@ function MapPlanerWorkspace() {
           </aside>
         )}
 
-        <main
-          ref={mapAreaRef}
-          className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#dfe6d9] dark:bg-[#313944]"
-        >
+        <main ref={mapAreaRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-[#dfe6d9] dark:bg-[#08110d]">
           <MapView
             ref={mapRef}
             route={route}
@@ -1529,18 +1165,6 @@ function MapPlanerWorkspace() {
               }
               selectBusStop(stop, false);
             }}
-            liveBuses={visibleLiveBuses}
-            showLiveBuses={showLiveBuses}
-            selectedLiveBusId={selectedLiveBus?.vehicleId ?? null}
-            onLiveBusClick={(bus) => {
-              setSelectedStop(null);
-              setSelectedLiveBus((prev) =>
-                prev?.vehicleId === bus.vehicleId ? null : bus
-              );
-            }}
-            trafficSignals={trafficSignals}
-            showTrafficSignals={showTrafficSignals}
-            kursowkaOverlay={kursowkaOverlay}
             navCoord={navCoord}
             followNav={navActive && navPlaying}
             focus={focus}
@@ -1551,19 +1175,10 @@ function MapPlanerWorkspace() {
           />
 
           <div className="pointer-events-none absolute inset-0 z-[500]">
-            <div className="absolute left-3 top-5 flex max-w-[calc(100%-72px)] flex-col gap-2 lg:top-3">
+            <div className="absolute left-3 top-5 max-w-[calc(100%-72px)] lg:top-3">
               {addMode ? (
-                <div className="pointer-events-auto">
-                  <MapDrawingBanner
-                    count={assignedCount}
-                    onDone={() => setAddMode(false)}
-                    onUndo={() => {
-                      if (waypoints.length > 2) {
-                        handleRemovePoint(waypoints[waypoints.length - 2].id);
-                      }
-                    }}
-                  />
-                </div>
+                <div className="pointer-events-auto"><MapDrawingBanner count={assignedCount} onDone={() => setAddMode(false)}
+                  onUndo={() => { if (waypoints.length > 2) handleRemovePoint(waypoints[waypoints.length - 2].id); }} /></div>
               ) : pickTarget ? (
                 <div className="pointer-events-auto">
                   <PickBanner
@@ -1579,24 +1194,6 @@ function MapPlanerWorkspace() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <div className="pointer-events-auto">
-                    <LiveFleetControl
-                      showLiveBuses={showLiveBuses}
-                      onToggleLiveBuses={() => setShowLiveBuses((c) => !c)}
-                      operatorFilter={operatorFilter}
-                      onOperatorFilter={setOperatorFilter}
-                      liveVehicles={liveVehicles}
-                      liveTraffic={liveTraffic}
-                      liveLoading={liveLoading}
-                      onRefreshLive={() => void fetchLiveBuses(true)}
-                      signalCount={trafficSignals.length}
-                      showTrafficSignals={showTrafficSignals}
-                      onToggleTrafficSignals={() => setShowTrafficSignals((c) => !c)}
-                      kursowkaOverlayTitle={kursowkaOverlay?.title ?? null}
-                      onClearKursowkaOverlay={() => setKursowkaOverlay(null)}
-                      onSelectBus={handleSelectBus}
-                    />
-                  </div>
                   <MapRouteCard
                     route={route}
                     waypoints={waypoints}
@@ -1616,28 +1213,8 @@ function MapPlanerWorkspace() {
                       onAddVia={() => addBusStop(selectedStop, "via")}
                       onSetStart={() => addBusStop(selectedStop, "start")}
                       onSetEnd={() => addBusStop(selectedStop, "end")}
-                      onCenter={() =>
-                        mapRef.current?.centerOn(selectedStop.lat, selectedStop.lon, 16)
-                      }
-                      onOpenKursowka={handleOpenKursowkaFromItem}
+                      onCenter={() => mapRef.current?.centerOn(selectedStop.lat, selectedStop.lon, 16)}
                     />
-                  )}
-                  {selectedLiveBus && (
-                    <div className="pointer-events-auto">
-                      <LiveBusCard
-                        bus={selectedLiveBus}
-                        onClose={() => setSelectedLiveBus(null)}
-                        onOpenKursowka={(code) => handleOpenKursowkaFromItem("", code)}
-                        onSetOperator={handleSetOperator}
-                        onCenter={() =>
-                          mapRef.current?.centerOn(
-                            selectedLiveBus.lat,
-                            selectedLiveBus.lon,
-                            16
-                          )
-                        }
-                      />
-                    </div>
                   )}
                 </div>
               )}
@@ -1691,27 +1268,20 @@ function MapPlanerWorkspace() {
               </span>
               <span className="h-2 w-px bg-line" />
               <span className="flex items-center gap-1 text-[7.5px] font-bold text-mute">
+                <span className="h-1.5 w-1.5 rounded-full border border-brand bg-surface" /> punkt pośredni
+              </span>
+              <span className="h-2 w-px bg-line" />
+              <span className="flex items-center gap-1 text-[7.5px] font-bold text-mute">
                 <span className="h-1.5 w-1.5 rounded-full bg-ink ring-1 ring-highlight" /> B meta
               </span>
               <span className="h-2 w-px bg-line" />
               <span className="flex items-center gap-1 text-[7.5px] font-bold text-mute">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#1a73e8]" /> przystanek (
-                {visibleStops.length})
+                <span className="h-1.5 w-1.5 rounded-full border border-brand bg-surface" /> przystanek ({visibleStops.length})
               </span>
               <span className="h-2 w-px bg-line" />
               <span className="flex items-center gap-1 text-[7.5px] font-bold text-mute">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#86efac]" /> MZUK
-                <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-[#c084fc]" /> ŚKA ({visibleLiveBuses.length})
+                <span className="h-1.5 w-1.5 rounded-full bg-highlight ring-1 ring-brand/40" /> przy trasie ({nearRoute.size})
               </span>
-              {trafficSignals.length > 0 && (
-                <>
-                  <span className="h-2 w-px bg-line" />
-                  <span className="flex items-center gap-1 text-[7.5px] font-bold text-mute">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> światła (
-                    {trafficSignals.length})
-                  </span>
-                </>
-              )}
             </div>
           </div>
 
@@ -1719,8 +1289,8 @@ function MapPlanerWorkspace() {
             <div className="pointer-events-none absolute inset-0 z-[1200]">
               <MapContextMenu
                 ref={contextMenuRef}
-                lat={contextMenu.lat}
-                lon={contextMenu.lon}
+                latitude={contextMenu.lat}
+                longitude={contextMenu.lon}
                 left={contextMenu.left}
                 top={contextMenu.top}
                 onSetStart={() => setContextCoordinate("start")}
@@ -1750,20 +1320,6 @@ function MapPlanerWorkspace() {
           )}
         </main>
       </div>
-
-      <KursowkiDialog
-        open={kursowkiOpen}
-        initialKursowkaId={kursowkaDeepLink.id}
-        initialKursowkaCode={kursowkaDeepLink.code}
-        onClose={() => setKursowkiOpen(false)}
-        liveVehicles={liveVehicles}
-        onSelectBus={handleSelectBus}
-        onLoadTripToPlanner={handleLoadTripToPlanner}
-        onShowShapeOnMap={(shape) => {
-          setKursowkaOverlay(shape);
-          showToast(`Wyświetlono trasę: ${shape.title}`);
-        }}
-      />
 
       <StepsDrawer
         open={stepsOpen}

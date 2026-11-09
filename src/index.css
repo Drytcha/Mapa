@@ -1,10 +1,11 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: var(--font-manrope), "Manrope", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
   --color-canvas: #f1f3ee;
   --color-surface: #ffffff;
@@ -28,29 +29,30 @@
 }
 
 .dark {
-  --color-canvas: #1d2229;
-  --color-surface: #252b34;
-  --color-raised: #2d3540;
-  --color-soft: #36404d;
-  --color-ink: #f3f6f8;
-  --color-ink-soft: #d7dfe7;
-  --color-mute: #a8b4c0;
-  --color-line: #3f4957;
-  --color-line-strong: #566375;
-  --color-brand: #b7ed8c;
-  --color-brand-deep: #d0f5b3;
-  --color-on-brand: #172510;
-  --color-brand-soft: #2b3c32;
-  --color-brand-ink: #b7ed8c;
+  --color-canvas: #0a100d;
+  --color-surface: #121a16;
+  --color-raised: #17211c;
+  --color-soft: #1b2720;
+  --color-ink: #eef3ed;
+  --color-ink-soft: #c6d2c9;
+  --color-mute: #8e9c93;
+  --color-line: #243129;
+  --color-line-strong: #35463b;
+  --color-brand: #c9f078;
+  --color-brand-deep: #dbf6a1;
+  --color-on-brand: #102016;
+  --color-brand-soft: #1d2c21;
+  --color-brand-ink: #c9f078;
   --color-highlight: #d7f36e;
-  --color-highlight-soft: #36432b;
-  --color-warning: #efbd76;
-  --color-warning-soft: #3f3323;
-  --color-danger: #f5a18e;
+  --color-highlight-soft: #26351f;
+  --color-warning: #e8b867;
+  --color-warning-soft: #2b2518;
+  --color-danger: #ef9d86;
 }
 
 html,
-body {
+body,
+#root {
   min-height: 100%;
   height: 100%;
 }
@@ -121,11 +123,7 @@ button {
 }
 
 .dark .leaflet-container {
-  background: #363e4a;
-}
-
-.basemap-layer--dark {
-  filter: invert(0.80) hue-rotate(180deg) brightness(1.42) contrast(0.90) saturate(0.86);
+  background: #0a1410;
 }
 
 .leaflet-control-attribution {
@@ -288,21 +286,21 @@ button {
   border: 2px solid #ffffff;
   color: #ffffff;
   box-shadow: 0 2px 7px rgb(8 35 24 / 24%);
-  transition:
-    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 0.16s ease,
-    box-shadow 0.16s ease;
-  animation: stopPop 0.26s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 .bus-stop::before {
   content: "";
   position: absolute;
   inset: -10px;
 }
+.bus-stop {
+  transition:
+    transform 0.16s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
 .bus-stop:hover {
   transform: scale(1.3);
   background: var(--color-highlight-soft);
-  color: #13221b;
   box-shadow: 0 4px 12px rgb(8 35 24 / 30%);
 }
 .bus-stop--on {
@@ -330,158 +328,14 @@ button {
     0 0 0 2.5px var(--color-highlight),
     0 2px 7px rgb(8 35 24 / 26%);
 }
-
-.bus-stop--osm {
-  background: #64748b;
-}
-
-/* --------------------------- Live GPS Buses ------------------------------ */
-
-.live-bus-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 144px;
-  pointer-events: none;
-  transform-origin: center 13px;
-  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.live-bus-wrap:hover {
-  transform: scale(1.08);
-}
-.live-bus-wrap--selected {
-  transform: scale(1.14);
-}
-.live-bus-wrap > * {
-  pointer-events: auto;
-}
-.leaflet-marker-icon.pin-wrap:has(.live-bus-wrap) {
-  pointer-events: none !important;
-}
-.live-bus {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 72px;
-  white-space: nowrap;
-  height: 26px;
-  padding: 0 10px 0 18px;
-  border-radius: 999px;
-  background: var(--operator-bg, #cbd5e1);
-  color: var(--operator-fg, #273449);
-  border: 2px solid #ffffff;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1;
+.bus-stop--route.bus-stop--on {
   box-shadow:
-    0 0 0 2px rgba(15, 20, 26, 0.82),
-    0 5px 14px rgb(0 0 0 / 48%);
-  transition: box-shadow 0.16s ease;
+    0 0 0 3px var(--color-highlight),
+    0 4px 12px rgb(8 35 24 / 32%);
 }
-.live-bus:hover {
-  z-index: 5;
-  box-shadow:
-    0 0 0 2.5px rgba(255, 255, 255, 0.95),
-    0 8px 22px rgb(0 0 0 / 58%);
-}
-.live-bus--selected {
-  box-shadow:
-    0 0 0 3.5px rgba(215, 243, 110, 0.95),
-    0 8px 26px rgba(0, 0, 0, 0.68);
-}
-.live-bus-op {
-  position: absolute;
-  left: -6px;
-  top: -6px;
-  display: grid;
-  place-items: center;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  border: 1.5px solid #ffffff;
-  font-family: var(--font-sans);
-  font-size: 8.5px;
-  font-weight: 900;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
-}
-.live-bus-op--mzuk {
-  background: #86efac;
-  color: #10351e;
-}
-.live-bus-op--ska {
-  background: #c084fc;
-  color: #1b0734;
-}
-.live-bus-op--other {
-  background: #cbd5e1;
-  color: #1e293b;
-}
-.live-bus-arrow {
-  display: inline-block;
-  font-size: 8px;
-  line-height: 1;
-  opacity: 0.95;
-}
-.live-bus-label {
-  letter-spacing: -0.015em;
-}
-.live-bus-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 17px;
-  padding: 0 7px;
-  border-radius: 8px;
-  border: 1.5px solid rgb(255 255 255 / 90%);
-  background: var(--delay-bg, #475569);
-  color: var(--delay-fg, #ffffff);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 40%);
-}
-.live-bus-delay {
-  font-weight: 900;
-}
-/* Zoomed far out: only the bus pills, the speed / delay chips would overlap */
-.live-compact .live-bus-chip {
-  display: none;
-}
-
-/* ------------------------- Traffic Signal Badges ------------------------- */
-
-.signal-badge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  width: 14px;
-  height: 24px;
-  padding: 3px 2px;
-  border-radius: 5px;
-  background: #1e2420;
-  border: 1.5px solid #ffffff;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.35);
-}
-.signal-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-}
-.signal-dot--r {
-  background: #ef4444;
-}
-.signal-dot--y {
-  background: #f59e0b;
-}
-.signal-dot--g {
-  background: #22c55e;
+/* Animated on the inner span only - the marker element keeps Leaflet's own transform. */
+.bus-stop {
+  animation: stopPop 0.26s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @keyframes stopPop {
@@ -613,6 +467,17 @@ button {
   }
 }
 
+@keyframes slideUpSheet {
+  from {
+    transform: translateY(30px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.25s ease-out both;
 }
@@ -621,6 +486,9 @@ button {
 }
 .animate-slide-right {
   animation: slideInRight 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-sheet {
+  animation: slideUpSheet 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .graticule-bg {
@@ -655,15 +523,3 @@ input[type="range"] {
     scroll-behavior: auto !important;
   }
 }
-
-/* Course rows must never shrink into one another inside a scrollable pane. */
-.duty-trip-card { flex: 0 0 auto; min-width: 0; }
-.duty-dialog-shell { display:flex; flex-direction:column; min-height:0; }
-.duty-dialog-shell > :first-child { flex-shrink:0; }
-.duty-browser-grid { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; }
-.duty-browser-grid > * { min-width:0; }
-@media (min-width:900px) { .duty-browser-grid { grid-template-columns:290px minmax(0,1fr); } }
-@media (max-width:899px) { .duty-browser-grid[data-mobile-view="list"] > .duty-detail-pane { display:none; } .duty-browser-grid[data-mobile-view="detail"] > .duty-list-pane { display:none; } }
-
-.duty-list-scroll,.duty-trips-scroll { min-height:0; max-height:52dvh; overflow-y:auto; }
-@media (max-width:899px) { .duty-list-scroll,.duty-trips-scroll { max-height:none; overflow:visible; } .duty-dialog-shell { max-height:94dvh; } }

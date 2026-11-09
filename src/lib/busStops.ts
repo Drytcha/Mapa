@@ -9,41 +9,42 @@ export interface Bounds {
   east: number;
 }
 
-/**
- * Whole Wałbrzych timetable area: Szczawno-Zdrój, Boguszów-Gorce, Jedlina-Zdrój, Głuszyca
- * with Andrzejówka and Rybnica Leśna, Mieroszów, Sokołowsko, Stare Bogaczowice and Struga.
- */
+/** Wałbrzych and the immediate surroundings (Szczawno-Zdrój, Boguszów-Gorce, Stare Bogaczowice). */
 export const WALBRZYCH_BOUNDS: Bounds = {
-  south: 50.6,
-  west: 16.07,
-  north: 50.88,
-  east: 16.44,
+  south: 50.7005,
+  west: 16.1475,
+  north: 50.8735,
+  east: 16.4215,
 };
 
 export const WALBRZYCH_CENTER: [number, number] = [50.7714, 16.2843];
 export const WALBRZYCH_ZOOM = 14;
 
+/** Free public Overpass instances. The first one is configurable without any API key. */
 const ENDPOINTS = [
   OVERPASS_URL,
-  "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
 ].filter((url, index, list) => list.indexOf(url) === index);
 
-const CACHE_PREFIX = "mapplaner.stops.v5.";
+// v3: two opposite platforms with different OSM refs are no longer merged.
+const CACHE_PREFIX = "mapplaner.stops.v3.";
 const CACHE_TTL = 12 * 60 * 60 * 1000;
 const memoryCache = new Map<string, { at: number; stops: BusStop[] }>();
 
 type StopKind = "platform" | "bus_stop" | "stop_position";
 const PRIORITY: Record<StopKind, number> = { platform: 3, bus_stop: 2, stop_position: 1 };
 
+// Duplicate OSM elements of ONE bay can be several metres apart. Two bays of the same
+// name on opposite sides of a road can also be close, so a bay reference/direction wins
+// over distance; otherwise mixed element kinds are merged only at very short range.
 const SAME_BAY_RADIUS_M = 30;
 const UNTAGGED_MIXED_RADIUS_M = 12;
 const EXACT_DUPLICATE_RADIUS_M = 3;
 const PARTLY_TAGGED_RADIUS_M = 8;
 
 const keyFor = (bounds: Bounds) =>
-  CACHE_PREFIX +
-  [bounds.south, bounds.west, bounds.north, bounds.east].map((v) => v.toFixed(3)).join(",");
+  CACHE_PREFIX + [bounds.south, bounds.west, bounds.north, bounds.east].map((v) => v.toFixed(3)).join(",");
 
 interface OverpassElement {
   type: "node" | "way" | "relation";
@@ -56,11 +57,7 @@ interface OverpassElement {
 
 function linesFromTags(tags: Record<string, string>): string[] {
   const raw = tags.route_ref || tags.lines || "";
-  return raw
-    .split(/[;,]/)
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .slice(0, 12);
+  return raw.split(/[;,]/).map((value) => value.trim()).filter(Boolean).slice(0, 12);
 }
 
 function classify(tags: Record<string, string>): StopKind | null {
@@ -104,8 +101,7 @@ function toCandidate(element: OverpassElement): Candidate | null {
   const direction = (tags.direction || tags.bearing || "").trim() || undefined;
   const towards = (tags.towards || tags.destination || "").trim() || undefined;
   const side = (tags.side || "").trim() || undefined;
-  const platformKey =
-    (ref || direction || towards || side || "").toLocaleLowerCase("pl") || undefined;
+  const platformKey = (ref || direction || towards || side || "").toLocaleLowerCase("pl") || undefined;
   return {
     kind,
     position,
@@ -129,36 +125,33 @@ function metresBetween(lat1: number, lon1: number, lat2: number, lon2: number): 
   return Math.hypot(dx, dy);
 }
 
-const foldName = (value: string) =>
-  value
-    .trim()
-    .toLocaleLowerCase("pl")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+const foldName = (value: string) => value.trim().toLocaleLowerCase("pl")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
 function canMerge(candidate: Candidate, existing: BusStop): boolean {
-  if (candidate.name && existing.name && foldName(candidate.name) !== foldName(existing.name)) {
-    return false;
-  }
-  const distance = metresBetween(
-    candidate.position[0],
-    candidate.position[1],
-    existing.lat,
-    existing.lon
-  );
+  if (candidate.name && existing.name && foldName(candidate.name) !== foldName(existing.name)) return false;
+  const distance = metresBetween(candidate.position[0], candidate.position[1], existing.lat, existing.lon);
   const candidateKey = candidate.platformKey;
   const existingKey = existing.platformKey;
   if (candidateKey && existingKey) {
+    // Different bay numbers/directions mean two real stops, even at the same location.
     return candidateKey === existingKey && distance <= SAME_BAY_RADIUS_M;
   }
   if (!candidateKey && !existingKey) {
     if (distance > UNTAGGED_MIXED_RADIUS_M) return false;
+    // Two separate bus_stop nodes without refs are opposite platforms, not one duplicate.
     if (candidate.kind === existing.kind && distance > EXACT_DUPLICATE_RADIUS_M) return false;
     return true;
   }
+  // One representation has a bay number and the other does not: merge only very close,
+  // complementary OSM elements (e.g. a platform and its stop_position).
   return distance <= PARTLY_TAGGED_RADIUS_M && candidate.kind !== existing.kind;
 }
 
+/**
+ * Keeps every physical platform. OSRM-independent: duplicate representations of the
+ * same bay are combined, but two bays of the same name with different refs survive.
+ */
 export function mergeStopCandidates(candidates: Candidate[]): BusStop[] {
   const merged: BusStop[] = [];
   for (const candidate of candidates) {
@@ -170,9 +163,7 @@ export function mergeStopCandidates(candidates: Candidate[]): BusStop[] {
       const candidatePriority = PRIORITY[candidate.kind];
       existing.lines = [...new Set([...existing.lines, ...candidate.lines])].slice(0, 14);
       existing.merged = (existing.merged ?? 1) + 1;
-      existing.kinds = [
-        ...new Set([...(existing.kinds ?? [existing.kind ?? "bus_stop"]), candidate.kind]),
-      ];
+      existing.kinds = [...new Set([...(existing.kinds ?? [existing.kind ?? "bus_stop"]), candidate.kind])];
       if (!existing.shelter && candidate.shelter) existing.shelter = true;
       if (!existing.operator && candidate.operator) existing.operator = candidate.operator;
       if (!existing.name && candidate.name) existing.name = candidate.name;
@@ -180,9 +171,8 @@ export function mergeStopCandidates(candidates: Candidate[]): BusStop[] {
       if (!existing.direction && candidate.direction) existing.direction = candidate.direction;
       if (!existing.towards && candidate.towards) existing.towards = candidate.towards;
       if (!existing.side && candidate.side) existing.side = candidate.side;
-      if (!existing.platformKey && candidate.platformKey) {
-        existing.platformKey = candidate.platformKey;
-      }
+      if (!existing.platformKey && candidate.platformKey) existing.platformKey = candidate.platformKey;
+      // The most precisely mapped element keeps its exact coordinates.
       if (candidatePriority > existingPriority) {
         existing.lat = lat;
         existing.lon = lon;
@@ -193,9 +183,7 @@ export function mergeStopCandidates(candidates: Candidate[]): BusStop[] {
     }
     merged.push({
       id: candidate.id,
-      name:
-        candidate.name ||
-        (candidate.operator ? `Przystanek ${candidate.operator}` : "Przystanek bez nazwy"),
+      name: candidate.name || (candidate.operator ? `Przystanek ${candidate.operator}` : "Przystanek bez nazwy"),
       lat,
       lon,
       lines: candidate.lines,
@@ -211,15 +199,15 @@ export function mergeStopCandidates(candidates: Candidate[]): BusStop[] {
       merged: 1,
     });
   }
-  return merged.sort((a, b) => stopDisplayName(a).localeCompare(b.name, "pl"));
+  return merged.sort((a, b) => stopDisplayName(a).localeCompare(stopDisplayName(b), "pl"));
 }
 
+/** A visible, unambiguous label for one physical platform. */
 export function stopDisplayName(stop: BusStop): string {
   if (stop.ref) return `${stop.name} · stan. ${stop.ref}`;
   if (stop.side) return `${stop.name} · strona ${stop.side}`;
   if (stop.towards) return `${stop.name} · do ${stop.towards}`;
   if (stop.direction) return `${stop.name} · kier. ${stop.direction}`;
-  if (stop.source === "timetable") return stop.name;
   return `${stop.name} · ${stop.lat.toFixed(4)}, ${stop.lon.toFixed(4)}`;
 }
 
@@ -230,9 +218,7 @@ function readCache(key: string): BusStop[] | null {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { at: number; stops: BusStop[] };
-    if (!parsed?.at || Date.now() - parsed.at > CACHE_TTL || !Array.isArray(parsed.stops)) {
-      return null;
-    }
+    if (!parsed?.at || Date.now() - parsed.at > CACHE_TTL || !Array.isArray(parsed.stops)) return null;
     memoryCache.set(key, { at: parsed.at, stops: parsed.stops });
     return parsed.stops;
   } catch {
@@ -245,25 +231,11 @@ function writeCache(key: string, stops: BusStop[]) {
   try {
     localStorage.setItem(key, JSON.stringify({ at: Date.now(), stops }));
   } catch {
-    /* Storage optional */
+    /* Storage may be full or disabled - the memory cache still applies. */
   }
 }
 
-function boundsInsideWalbrzych(bounds: Bounds): boolean {
-  return (
-    bounds.south >= WALBRZYCH_BOUNDS.south - 0.03 &&
-    bounds.west >= WALBRZYCH_BOUNDS.west - 0.04 &&
-    bounds.north <= WALBRZYCH_BOUNDS.north + 0.03 &&
-    bounds.east <= WALBRZYCH_BOUNDS.east + 0.04
-  );
-}
-
-async function queryEndpoint(
-  url: string,
-  query: string,
-  timeout: number,
-  signal?: AbortSignal
-): Promise<OverpassElement[]> {
+async function queryEndpoint(url: string, query: string, timeout: number, signal?: AbortSignal): Promise<OverpassElement[]> {
   return withOverpassSlot(async () => {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -274,10 +246,7 @@ async function queryEndpoint(
       const response = await fetch(url, {
         method: "POST",
         signal: controller.signal,
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-        },
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
         body: new URLSearchParams({ data: query }).toString(),
       });
       if (!response.ok) throw new Error(`Overpass ${response.status}`);
@@ -296,84 +265,7 @@ async function queryEndpoint(
   }, signal);
 }
 
-function elementsToStops(elements: OverpassElement[], bounds?: Bounds): BusStop[] {
-  const candidates: Candidate[] = [];
-  const seenIds = new Set<string>();
-  for (const element of elements) {
-    const candidate = toCandidate(element);
-    if (!candidate || seenIds.has(candidate.id)) continue;
-    if (bounds) {
-      const [lat, lon] = candidate.position;
-      if (lat < bounds.south || lat > bounds.north || lon < bounds.west || lon > bounds.east) {
-        continue;
-      }
-    }
-    seenIds.add(candidate.id);
-    candidates.push(candidate);
-  }
-  return mergeStopCandidates(candidates);
-}
-
-let timetableCache: { at: number; stops: BusStop[] } | null = null;
-const TIMETABLE_TTL = 10 * 60 * 1000;
-
-/** Stops of the Wałbrzych timetable (GTFS + official rozklad.walbrzych.eu list). */
-export async function fetchTimetableStops(signal?: AbortSignal, force = false): Promise<BusStop[]> {
-  if (!force && timetableCache && Date.now() - timetableCache.at < TIMETABLE_TTL) {
-    return timetableCache.stops;
-  }
-  const response = await fetch(`/api/stops/walbrzych${force ? "?refresh=1" : ""}`, {
-    signal,
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error("Nie udało się pobrać przystanków z rozkładu Wałbrzych.");
-  const json = (await response.json()) as { ok: boolean; stops?: BusStop[] };
-  const stops = Array.isArray(json.stops) ? json.stops : [];
-  if (stops.length) timetableCache = { at: Date.now(), stops };
-  return stops;
-}
-
-const insideBounds = (stop: BusStop, bounds: Bounds) =>
-  stop.lat >= bounds.south &&
-  stop.lat <= bounds.north &&
-  stop.lon >= bounds.west &&
-  stop.lon <= bounds.east;
-
-/**
- * Timetable stops are authoritative. OpenStreetMap stops are matched to them (<= 40 m with
- * the same name, or <= 14 m) and only add attributes; OSM-only stops are kept as "osm".
- */
-export function mergeTimetableWithOsm(timetable: BusStop[], osm: BusStop[]): BusStop[] {
-  const result = timetable.map((stop) => ({ ...stop }));
-  for (const candidate of osm) {
-    const candidateName = foldName(candidate.name);
-    let hit = -1;
-    let best = 40;
-    for (let index = 0; index < result.length; index += 1) {
-      const existing = result[index];
-      if (existing.source !== "timetable") continue;
-      const distance = metresBetween(candidate.lat, candidate.lon, existing.lat, existing.lon);
-      if (distance > best) continue;
-      const existingName = foldName(existing.name);
-      const sameName =
-        !candidateName ||
-        existingName === candidateName ||
-        existingName.includes(candidateName) ||
-        candidateName.includes(existingName);
-      if (distance <= 14 || sameName) {
-        best = distance;
-        hit = index;
-      }
-    }
-    if (hit >= 0) {
-      if (candidate.shelter) result[hit].shelter = true;
-      continue;
-    }
-    result.push({ ...candidate, source: "osm" });
-  }
-  return result.sort((a, b) => stopDisplayName(a).localeCompare(stopDisplayName(b), "pl"));
-}
-
+/** Bus stops come from the free Overpass API (OpenStreetMap): no key, no account. */
 export async function fetchBusStops(
   bounds: Bounds,
   options: { signal?: AbortSignal; force?: boolean; onProgress?: (seconds: number) => void } = {}
@@ -384,24 +276,6 @@ export async function fetchBusStops(
     const cached = readCache(key);
     if (cached) return cached;
   }
-
-  let timetable: BusStop[] = [];
-  try {
-    timetable = (await fetchTimetableStops(signal, false)).filter((stop) =>
-      insideBounds(stop, bounds)
-    );
-  } catch (error) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (error instanceof DOMException && error.name === "AbortError") throw error;
-    timetable = [];
-  }
-
-  // Default Wałbrzych view: the timetable alone is the complete answer
-  if (!force && boundsInsideWalbrzych(bounds) && timetable.length > 0) {
-    writeCache(key, timetable);
-    return timetable;
-  }
-
   const bbox = `${bounds.south},${bounds.west},${bounds.north},${bounds.east}`;
   const query = `[out:json][timeout:25];
 (
@@ -416,21 +290,14 @@ export async function fetchBusStops(
 out tags center;`;
 
   const startedAt = Date.now();
-  const ticker = onProgress
-    ? setInterval(() => onProgress(Math.round((Date.now() - startedAt) / 1000)), 1000)
-    : null;
+  const ticker = onProgress ? setInterval(() => onProgress(Math.round((Date.now() - startedAt) / 1000)), 1000) : null;
   let elements: OverpassElement[] | null = null;
   let lastError = "";
   try {
     for (let index = 0; index < ENDPOINTS.length; index += 1) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       try {
-        elements = await queryEndpoint(
-          ENDPOINTS[index],
-          query,
-          index === 0 ? 30000 : 18000,
-          signal
-        );
+        elements = await queryEndpoint(ENDPOINTS[index], query, index === 0 ? 45000 : 20000, signal);
         break;
       } catch (error) {
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -440,22 +307,27 @@ out tags center;`;
   } finally {
     if (ticker) clearInterval(ticker);
   }
-
   if (!elements) {
-    // Overpass is often overloaded; the timetable stops are still a correct, complete list
-    if (timetable.length > 0) return timetable;
     throw new Error(
       lastError.includes("429") || lastError.includes("504") || lastError.includes("timeout")
         ? "Publiczny Overpass jest przeciążony. Spróbuj ponownie za chwilę."
         : "Nie udało się pobrać przystanków z Overpass API."
     );
   }
-
-  const stops = mergeTimetableWithOsm(timetable, elementsToStops(elements));
+  const candidates: Candidate[] = [];
+  const seenIds = new Set<string>();
+  for (const element of elements) {
+    const candidate = toCandidate(element);
+    if (!candidate || seenIds.has(candidate.id)) continue;
+    seenIds.add(candidate.id);
+    candidates.push(candidate);
+  }
+  const stops = mergeStopCandidates(candidates);
   writeCache(key, stops);
   return stops;
 }
 
+/** One group per physical platform; opposite bays remain separately selectable. */
 export function groupStopsByName(stops: BusStop[]) {
   const groups = new Map<string, BusStop[]>();
   for (const stop of stops) {
@@ -477,24 +349,18 @@ export function groupStopsByName(stops: BusStop[]) {
 }
 
 export function filterStops(stops: BusStop[], query: string) {
-  const fold = (value: string) =>
-    value
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/ł/g, "l");
+  const fold = (value: string) => value.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l");
   const term = fold(query.trim());
   if (!term) return stops;
-  return stops.filter((stop) =>
-    [
-      stop.name,
-      stopDisplayName(stop),
-      stop.ref ?? "",
-      stop.towards ?? "",
-      stop.direction ?? "",
-      stop.side ?? "",
-      stop.operator ?? "",
-      ...stop.lines,
-    ].some((value) => fold(value).includes(term))
-  );
+  return stops.filter((stop) => [
+    stop.name,
+    stopDisplayName(stop),
+    stop.ref ?? "",
+    stop.towards ?? "",
+    stop.direction ?? "",
+    stop.side ?? "",
+    stop.operator ?? "",
+    ...stop.lines,
+  ].some((value) => fold(value).includes(term)));
 }

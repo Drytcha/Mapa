@@ -1,25 +1,21 @@
-"use client";
-
 import { useState } from "react";
 import {
-  BusFront,
   ChevronDown,
-  FileDown,
   FileSpreadsheet,
+  FileDown,
   ListOrdered,
   Loader2,
   Menu,
   Moon,
-  Radio,
   Route as RouteIcon,
   Settings2,
   Sun,
   Truck,
   X,
 } from "lucide-react";
-import type { RouteData, ThemeMode } from "@/lib/types";
-import { readableEngine } from "@/lib/geo";
-import { cn } from "@/utils/cn";
+import type { RouteData, ThemeMode } from "../lib/types";
+import { readableEngine } from "../lib/geo";
+import { cn } from "../utils/cn";
 import { IconButton, Logo } from "./UI";
 
 interface TopBarProps {
@@ -27,16 +23,11 @@ interface TopBarProps {
   isRouting: boolean;
   routeReady: boolean;
   theme: ThemeMode;
-  liveBusCount: number;
-  showLiveBuses: boolean;
-  kursowkiOpen: boolean;
-  onToggleLiveBuses: () => void;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
   onOpenSteps: () => void;
   onOpenFleet: () => void;
   onOpenReport: () => void;
-  onOpenKursowki: () => void;
   onOpenPlanner: () => void;
   onOpenPdf: () => void;
   pdfDisabled: boolean;
@@ -44,7 +35,6 @@ interface TopBarProps {
 
 const NAV = [
   { id: "planner", label: "Planer", icon: RouteIcon },
-  { id: "kursowki", label: "Kursówki", icon: BusFront },
   { id: "nav", label: "Nawigacja", icon: ListOrdered },
   { id: "fleet", label: "Flota", icon: Truck },
   { id: "report", label: "Raporty", icon: FileSpreadsheet },
@@ -55,16 +45,11 @@ export default function TopBar({
   isRouting,
   routeReady,
   theme,
-  liveBusCount,
-  showLiveBuses,
-  kursowkiOpen,
-  onToggleLiveBuses,
   onToggleTheme,
   onOpenSettings,
   onOpenSteps,
   onOpenFleet,
   onOpenReport,
-  onOpenKursowki,
   onOpenPlanner,
   onOpenPdf,
   pdfDisabled,
@@ -74,7 +59,6 @@ export default function TopBar({
 
   const action = (id: (typeof NAV)[number]["id"]) => {
     if (id === "planner") onOpenPlanner();
-    if (id === "kursowki") onOpenKursowki();
     if (id === "nav") onOpenSteps();
     if (id === "fleet") onOpenFleet();
     if (id === "report") onOpenReport();
@@ -85,7 +69,7 @@ export default function TopBar({
       <div className="flex min-w-0 items-center gap-3 lg:w-[403px]">
         <Logo />
         <span className="hidden rounded-full border border-line bg-raised px-1.5 py-[2px] text-[7px] font-extrabold uppercase tracking-[0.1em] text-mute 2xl:inline">
-          Wałbrzych GTFS
+          Bezpłatny
         </span>
       </div>
 
@@ -95,9 +79,7 @@ export default function TopBar({
       >
         {NAV.map((item) => {
           const Icon = item.icon;
-          const active =
-            (item.id === "planner" && !kursowkiOpen) ||
-            (item.id === "kursowki" && kursowkiOpen);
+          const active = item.id === "planner";
           return (
             <button
               key={item.id}
@@ -112,10 +94,7 @@ export default function TopBar({
               )}
             >
               <Icon
-                className={cn(
-                  "h-3 w-3",
-                  active ? "text-on-brand" : "text-mute group-hover:text-ink-soft"
-                )}
+                className={cn("h-3 w-3", active ? "text-on-brand" : "text-mute group-hover:text-ink-soft")}
                 strokeWidth={2.1}
               />
               {item.label}
@@ -125,24 +104,6 @@ export default function TopBar({
       </nav>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-        <button
-          type="button"
-          onClick={onToggleLiveBuses}
-          title="Pokaż / ukryj autobusy GPS Wałbrzych (MZUK, ŚKA)"
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-full border px-2 text-[8.5px] font-bold transition-colors",
-            showLiveBuses
-              ? "border-emerald-500/40 bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
-              : "border-line bg-raised text-mute hover:text-ink"
-          )}
-        >
-          <Radio
-            className={cn("h-2.5 w-2.5", showLiveBuses && liveBusCount > 0 && "animate-pulse")}
-          />
-          <span className="hidden sm:inline">GPS</span>
-          <span className="metric">{liveBusCount}</span>
-        </button>
-
         <span
           className="hidden h-7 items-center gap-1.5 rounded-full border border-line bg-raised px-2 text-[8px] font-bold text-ink-soft xl:flex"
           title={`Silnik routingu: ${readableEngine(route.engine)}`}
@@ -150,23 +111,15 @@ export default function TopBar({
           {isRouting ? (
             <Loader2 className="h-2.5 w-2.5 animate-spin text-mute" />
           ) : (
-            <span
-              className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-emerald-500" : "bg-warning")}
-            />
+            <span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-emerald-500" : "bg-warning")} />
           )}
           <span className="text-mute">Routing</span>
           {isRouting ? "przeliczanie" : live ? "gotowy" : "oczekuje"}
         </span>
 
-        <button
-          type="button"
-          onClick={onOpenPdf}
-          disabled={pdfDisabled}
-          aria-label="Eksport trasy do PDF"
-          className="flex h-8 items-center gap-1.5 rounded-lg bg-brand px-2.5 text-[10px] font-bold text-on-brand transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <FileDown className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">PDF</span>
+        <button type="button" onClick={onOpenPdf} disabled={pdfDisabled} aria-label="Eksport trasy do PDF"
+          className="flex h-8 items-center gap-1.5 rounded-lg bg-brand px-2.5 text-[10px] font-bold text-on-brand transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">
+          <FileDown className="h-3.5 w-3.5" /><span className="hidden sm:inline">PDF</span>
         </button>
         <IconButton label="Darmowe źródła i informacje" onClick={onOpenSettings}>
           <Settings2 className="h-3.5 w-3.5" />
@@ -211,7 +164,7 @@ export default function TopBar({
           <ChevronDown className="hidden h-3 w-3 text-mute 2xl:block" />
         </div>
 
-        <div className="relative md:hidden">
+        <div className="relative sm:hidden">
           <button
             type="button"
             onClick={() => setMenuOpen((current) => !current)}
@@ -235,15 +188,7 @@ export default function TopBar({
                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-ink-soft transition-colors hover:bg-raised hover:text-ink"
                   >
                     <Icon className="h-3.5 w-3.5 text-brand-ink" />
-                    {item.id === "kursowki"
-                      ? "Kursówki Wałbrzych (GTFS)"
-                      : item.id === "nav"
-                        ? "Instrukcje nawigacji"
-                        : item.id === "fleet"
-                          ? "Flota i przepisy"
-                          : item.id === "report"
-                            ? "Raport, PDF i CSV"
-                            : "Planer trasy"}
+                    {item.id === "nav" ? "Instrukcje nawigacji" : item.id === "fleet" ? "Flota i przepisy" : item.id === "report" ? "Raport, PDF i CSV" : "Planer trasy"}
                   </button>
                 );
               })}

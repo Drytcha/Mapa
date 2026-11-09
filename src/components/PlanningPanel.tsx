@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import {
   Bookmark,
@@ -13,7 +11,6 @@ import type {
   AvoidOptions,
   BrigadeInfo,
   BusStop,
-  LiveTrafficSummary,
   Place,
   ProfileMetrics,
   RouteData,
@@ -21,15 +18,15 @@ import type {
   SpeedOverrides,
   VehicleId,
   Waypoint,
-} from "@/lib/types";
-import type { SavedBrigadePlan } from "@/lib/brigade";
-import { readableEngine } from "@/lib/geo";
+} from "../lib/types";
+import type { SavedBrigadePlan } from "../lib/brigade";
+import { readableEngine } from "../lib/geo";
 import BrigadePanel from "./BrigadePanel";
 import RouteForm from "./RouteForm";
 import FleetSpeedPanel from "./FleetSpeedPanel";
 import BusStopPanel from "./BusStopPanel";
 import SchedulePanel from "./SchedulePanel";
-import type { ScheduleEvaluation } from "@/lib/schedule";
+import type { ScheduleEvaluation } from "../lib/schedule";
 import { TripSummary, VehicleComparison } from "./TripSummary";
 import { IconButton, Pill } from "./UI";
 
@@ -46,11 +43,12 @@ type SidebarSection =
 
 type CollapsedState = Record<SidebarSection, boolean>;
 
+/** Only the route editor is open on a fresh visit. */
 const DEFAULT_COLLAPSED: CollapsedState = {
   brigade: true,
   route: false,
   fleet: true,
-  schedule: false,
+  schedule: true,
   stops: true,
   summary: true,
   comparison: true,
@@ -66,7 +64,7 @@ function loadCollapsedState(): CollapsedState {
       brigade: parsed.brigade !== false,
       route: parsed.route === true,
       fleet: parsed.fleet !== false,
-      schedule: parsed.schedule === true,
+      schedule: parsed.schedule !== false,
       stops: parsed.stops !== false,
       summary: parsed.summary !== false,
       comparison: parsed.comparison !== false,
@@ -96,9 +94,6 @@ interface PlanningPanelProps {
   schedule: ScheduleSettings;
   scheduleEvaluation: ScheduleEvaluation;
   clockNow: number;
-  signalCount: number;
-  signalsLoading: boolean;
-  liveTraffic: LiveTrafficSummary | null;
   onScheduleChange: (settings: ScheduleSettings) => void;
   speeds: SpeedOverrides;
   addMode: boolean;
@@ -145,7 +140,6 @@ interface PlanningPanelProps {
   onAddBusStop: (stop: BusStop) => void;
   onAddStopsAlongRoute: () => void;
   onCenterWalbrzych: () => void;
-  onOpenKursowka: (kursowkaId: string, kursowkaCode: string) => void;
 }
 
 export default function PlanningPanel(props: PlanningPanelProps) {
@@ -155,7 +149,7 @@ export default function PlanningPanel(props: PlanningPanelProps) {
     try {
       localStorage.setItem(SIDEBAR_COLLAPSED_KEY, JSON.stringify(collapsed));
     } catch {
-      /* Storage optional */
+      /* Storage is optional. */
     }
   }, [collapsed]);
 
@@ -181,7 +175,7 @@ export default function PlanningPanel(props: PlanningPanelProps) {
               Zaplanuj trasę
             </h1>
             <p className="mt-1 max-w-[280px] text-[9px] leading-snug text-mute">
-              Do 50 punktów, kursówki GTFS Wałbrzych, światła, korki i autobusy GPS na żywo.
+              Do 50 punktów, nazwa brygady, stałe prędkości wozów i mapa do PDF. Bez konta i kluczy API.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1 pt-0.5">
@@ -194,15 +188,9 @@ export default function PlanningPanel(props: PlanningPanelProps) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={props.onOpenPdf}
-          disabled={!props.exportReady}
-          className="mb-2.5 flex h-9 w-full items-center justify-between rounded-lg border border-brand/25 bg-brand-soft px-3 text-[11px] font-bold text-brand-ink transition-colors hover:border-brand/50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span className="flex items-center gap-2">
-            <FileDown className="h-3.5 w-3.5" /> Pobierz trasę PDF
-          </span>
+        <button type="button" onClick={props.onOpenPdf} disabled={!props.exportReady}
+          className="mb-2.5 flex h-9 w-full items-center justify-between rounded-lg border border-brand/25 bg-brand-soft px-3 text-[11px] font-bold text-brand-ink transition-colors hover:border-brand/50 disabled:cursor-not-allowed disabled:opacity-50">
+          <span className="flex items-center gap-2"><FileDown className="h-3.5 w-3.5" /> Pobierz trasę PDF</span>
           <span className="text-[8px] font-semibold">Cała mapa · margines 2 cm</span>
         </button>
 
@@ -244,20 +232,10 @@ export default function PlanningPanel(props: PlanningPanelProps) {
           onToggleCollapse={() => toggleSection("route")}
         />
 
-        {props.routingError && (
-          <div
-            role="alert"
-            className="mt-2 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-[10px] leading-relaxed text-warning"
-          >
-            {props.routingError} Mapa może pokazywać poprzednią trasę. Eksport jest zablokowany do
-            udanego przeliczenia.
-          </div>
-        )}
-        {props.route.warnings?.map((warning) => (
-          <p key={warning} role="status" className="mt-2 px-1 text-[9px] leading-relaxed text-warning">
-            {warning}
-          </p>
-        ))}
+        {props.routingError && <div role="alert" className="mt-2 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-[10px] leading-relaxed text-warning">
+          {props.routingError} Mapa może pokazywać poprzednią trasę. Eksport jest zablokowany do udanego przeliczenia.
+        </div>}
+        {props.route.warnings?.map((warning) => <p key={warning} role="status" className="mt-2 px-1 text-[9px] leading-relaxed text-warning">{warning}</p>)}
 
         <div className="mt-2.5">
           <FleetSpeedPanel
@@ -280,9 +258,6 @@ export default function PlanningPanel(props: PlanningPanelProps) {
             evaluation={props.scheduleEvaluation}
             routeReady={props.routeReady}
             now={props.clockNow}
-            signalCount={props.signalCount}
-            signalsLoading={props.signalsLoading}
-            liveTraffic={props.liveTraffic}
             onChange={props.onScheduleChange}
             collapsed={collapsed.schedule}
             onToggleCollapse={() => toggleSection("schedule")}
@@ -310,7 +285,6 @@ export default function PlanningPanel(props: PlanningPanelProps) {
             onAdd={props.onAddBusStop}
             onAddNearRoute={props.onAddStopsAlongRoute}
             onCenterWałbrzych={props.onCenterWalbrzych}
-            onOpenKursowka={props.onOpenKursowka}
             collapsed={collapsed.stops}
             onToggleCollapse={() => toggleSection("stops")}
           />
@@ -344,24 +318,51 @@ export default function PlanningPanel(props: PlanningPanelProps) {
           />
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-line bg-raised px-3 py-2 text-[9px] text-mute">
-          <span className="flex items-center gap-1.5 truncate">
-            <Sparkles className="h-3 w-3 shrink-0 text-brand-ink" />
-            {readableEngine(props.route.engine)}
-          </span>
-          <button
-            type="button"
-            onClick={props.onOpenSettings}
-            className="flex shrink-0 items-center gap-1 font-bold text-brand-ink hover:underline"
-          >
-            <SlidersHorizontal className="h-2.5 w-2.5" /> Źródła
-          </button>
+        <div className="mt-2.5 flex items-start gap-2 rounded-[12px] border border-dashed border-line-strong px-2.5 py-2">
+          <MousePointer2 className="mt-px h-3 w-3 shrink-0 text-brand-ink" />
+          <p className="text-[8.5px] leading-relaxed text-mute">
+            <span className="font-bold text-ink-soft">Ustaw start myszką</span> i{" "}
+            <span className="font-bold text-ink-soft">Ustaw metę myszką</span>, potem kliknij mapę albo przystanek.
+            Możesz też wybrać przystanek i nacisnąć <span className="font-bold text-ink-soft">Jedź tutaj</span>.
+          </p>
         </div>
 
-        <p className="mt-2 flex items-center gap-1.5 px-1 text-[8.5px] text-mute">
-          <MousePointer2 className="h-3 w-3 shrink-0" />
-          Prawy przycisk na mapie ustawia start A lub metę B.
-        </p>
+        <div className="mt-2 flex items-center justify-between gap-2 px-0.5">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                props.route.engine === "demo" ? "bg-warning" : "bg-emerald-500"
+              }`}
+            />
+            <span className="text-[8px] font-semibold text-mute">{readableEngine(props.route.engine)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={props.onOpenSettings}
+              className="flex items-center gap-1 text-[8px] font-bold text-mute transition-colors hover:text-brand-ink"
+            >
+              <Sparkles className="h-2.5 w-2.5" />
+              Darmowe źródła
+            </button>
+            <span className="h-2.5 w-px bg-line" />
+            <span className="text-[8px] font-semibold text-mute">© OSM contributors</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden shrink-0 items-center justify-between border-t border-line bg-surface px-3.5 py-1.5 lg:flex">
+        <span className="flex items-center gap-1.5 text-[7.5px] font-bold uppercase tracking-[0.12em] text-mute">
+          <SlidersHorizontal className="h-2.5 w-2.5" />
+          Ustawienia sesji · dokładność 3 miejsca
+        </span>
+        <button
+          type="button"
+          onClick={props.onOpenReport}
+          className="text-[8px] font-bold text-brand-ink hover:underline"
+        >
+          Metodologia →
+        </button>
       </div>
     </div>
   );

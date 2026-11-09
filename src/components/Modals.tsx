@@ -98,7 +98,7 @@ export function Dialog({
       <Backdrop onClose={onClose} />
       <div
         className={cn(
-          "relative max-h-[90dvh] w-full min-w-0 overflow-hidden rounded-[20px] border border-line bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.32)] animate-rise-in",
+          "relative max-h-[90vh] w-full overflow-hidden rounded-[20px] border border-line bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.32)] animate-rise-in",
           className ?? "max-w-[720px]"
         )}
       >
@@ -552,10 +552,7 @@ export function SettingsDialog({ open, onClose, engine }: { open: boolean; onClo
             ["OSM Standard", "Domyślny, szczegółowy podkład z ulicami i zatokami przystanków - dzięki niemu widać, że znacznik stoi w realnym miejscu. Pobierany tylko dla oglądanego widoku."],
             ["Esri / dane OSM", "Podkłady jasny, ciemny i satelitarny bez klucza. Jasny Esri jest używany w PDF, żeby nie pobierać kafelków OSM poza widokiem."],
             ["jsPDF", "Darmowa biblioteka open source. PDF powstaje lokalnie, z osadzoną czcionką obsługującą polskie znaki."],
-            ["Wałbrzych GTFS i Kursówki", "Rozkład jazdy oraz kursówki pobierane z otwartych danych Wałbrzych GTFS (api.zbiorkom.live + lokalny snapshot) i przechowywane w bazie PostgreSQL."],
-            ["GPS autobusów Wałbrzych (MZUK, ŚKA)", "Pozycje GPS, numery taborowe, kursówki i opóźnienia na żywo z zbiorkom.live. Przewoźnik wynika z numeru taborowego: MZUK 01–20 (wodorowe) i 201–204, ŚKA 3xx–5xx; ZDKiUM został zlikwidowany (1.01.2025) i nie prowadzi pojazdów. Błędne przypisanie można poprawić ręcznie na karcie autobusu. Prędkość jest liczona z kolejnych pozycji GPS (feed jej nie podaje). Kolor pojazdu oznacza firmę: jasnozielony MZUK, fioletowy ŚKA (odróżnia się od niebieskich przystanków). Pasek punktualności: minus oznacza opóźnienie (czerwony powyżej 3 min, pomarańczowy do 3 min), plus oznacza przyspieszenie (jasnozielony do 1 min, ciemnozielony powyżej 1 min)."],
-            ["Przystanki — rozkład Wałbrzych", "Lista przystanków pochodzi z rozkładu jazdy: GTFS oraz oficjalnej listy rozklad.walbrzych.eu (m.in. Andrzejówka, Głuszyca, Mieroszów, Sokołowsko). OpenStreetMap uzupełnia tylko dodatkowe przystanki po ręcznym odświeżeniu widoku."],
-            ["Sygnalizacja świetlna i korki", "Skrzyżowania ze światłami (OSM highway=traffic_signals) wykrywane wzdłuż trasy i grupowane w promieniu 55 m. Czas przejazdu łączy postoje na światłach, profil godzinowy oraz rzeczywiste opóźnienia GPS w Wałbrzychu."],
+            ["Godziny przejazdu i korki", "Obliczenia lokalne w strefie Europe/Warsaw. Korekta godzin szczytu to konfigurowalna symulacja do planowania, nie statystyki ruchu ani prognoza dla konkretnej ulicy. Publiczny OSRM nie dostarcza tych danych."],
           ].map(([name, detail]) => (
             <div key={name} className="border-b border-line py-3 first:pt-0 last:border-0">
               <h3 className="text-[11px] font-extrabold text-ink">{name}</h3>
@@ -612,7 +609,7 @@ export function ReportDialog({
 
   const makeCsv = () => {
     if (pdfDisabled) return;
-    const header = ["Brygada", "Linia", "Sluzba", "Profil", "Dystans [km]", "Dystans [m]", "Czas [s]", "Czas", "Srednia wlasna [km/h]", "Model czasu", "Czas bazowy [s]", "Sygnalizacja [liczba]", "Czas swiatel [s]", "Korki [s]", "Wyjazd Europe/Warsaw", "Przyjazd Europe/Warsaw", "Termin na mecie", "Zapas [min]", "Zrodlo korkow", "Maks. szczyt [%]"];
+    const header = ["Brygada", "Linia", "Sluzba", "Profil", "Dystans [km]", "Dystans [m]", "Czas [s]", "Czas", "Srednia wlasna [km/h]", "Model czasu", "Czas bazowy [s]", "Korki symulacja [s]", "Wyjazd Europe/Warsaw", "Przyjazd Europe/Warsaw", "Termin na mecie", "Zapas [min]", "Zrodlo korkow", "Maks. szczyt [%]"];
     const rows = metrics.map((metric) => {
       const profile = metric.name ?? metric.id;
       return [
@@ -627,14 +624,12 @@ export function ReportDialog({
         metric.customSpeed ?? "",
         metric.customSpeed === undefined ? "Model OSRM + wspolczynnik" : "Wlasna srednia",
         metric.journey?.baseSeconds ?? metric.duration,
-        metric.journey?.signalCount ?? 0,
-        metric.journey?.signalSeconds ?? 0,
         metric.journey?.delaySeconds ?? 0,
         metric.journey ? journeyIso(metric.journey.departure) : "",
         metric.journey ? journeyIso(metric.journey.arrival) : "",
         metric.journey?.targetArrival !== undefined ? journeyIso(metric.journey.targetArrival) : "",
         (metric.journey?.bufferSeconds ?? 0) / 60,
-        metric.journey?.trafficEnabled ? (metric.journey.liveTrafficEnabled ? "GPS + profil godzinowy" : "Profil godzinowy") : "Wylaczone",
+        metric.journey?.trafficEnabled ? "Symulacja - nie statystyki" : "Wylaczone",
         metric.journey?.trafficEnabled ? metric.journey.peakDelayPercent : 0,
       ];
     });

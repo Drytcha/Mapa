@@ -1,29 +1,9 @@
-"use client";
-
-import "leaflet/dist/leaflet.css";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import L from "leaflet";
-import { TILES } from "@/lib/services";
-import { isWaypointSet } from "@/lib/data";
-import {
-  DELAY_STYLES,
-  delayTone,
-  describeDelay,
-  formatDelay,
-  formatSpeed,
-  formatVehicleNumber,
-} from "@/lib/delay";
-import { stopDisplayName, WALBRZYCH_CENTER, WALBRZYCH_ZOOM } from "@/lib/busStops";
-import { OPERATOR_STYLES } from "@/lib/transit";
-import type {
-  BusStop,
-  LiveBusVehicle,
-  MapStyle,
-  RouteData,
-  ThemeMode,
-  TrafficSignalIntersection,
-  Waypoint,
-} from "@/lib/types";
+import { TILES } from "../lib/services";
+import { isWaypointSet } from "../lib/data";
+import { stopDisplayName, WALBRZYCH_CENTER, WALBRZYCH_ZOOM } from "../lib/busStops";
+import type { BusStop, MapStyle, ThemeMode, RouteData, Waypoint } from "../lib/types";
 
 export interface MapHandle {
   fitRoute: () => void;
@@ -31,13 +11,6 @@ export interface MapHandle {
   zoomOut: () => void;
   centerOn: (lat: number, lon: number, zoom?: number) => void;
   getBounds: () => { south: number; west: number; north: number; east: number } | null;
-}
-
-export interface KursowkaShapeOverlay {
-  title: string;
-  color: string;
-  polylines: [number, number][][];
-  stops: Array<{ name: string; lat: number; lon: number }>;
 }
 
 interface MapViewProps {
@@ -53,13 +26,6 @@ interface MapViewProps {
   nearRouteIds?: Set<string>;
   usedStopKeys?: Set<string>;
   onBusStopClick?: (stop: BusStop) => void;
-  liveBuses?: LiveBusVehicle[];
-  showLiveBuses?: boolean;
-  selectedLiveBusId?: string | null;
-  onLiveBusClick?: (bus: LiveBusVehicle) => void;
-  trafficSignals?: TrafficSignalIntersection[];
-  showTrafficSignals?: boolean;
-  kursowkaOverlay?: KursowkaShapeOverlay | null;
   navCoord?: [number, number] | null;
   followNav?: boolean;
   focus?: { lat: number; lon: number; zoom?: number; nonce: number } | null;
@@ -96,13 +62,6 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     nearRouteIds,
     usedStopKeys,
     onBusStopClick,
-    liveBuses = [],
-    showLiveBuses = true,
-    selectedLiveBusId = null,
-    onLiveBusClick,
-    trafficSignals = [],
-    showTrafficSignals = true,
-    kursowkaOverlay = null,
     navCoord,
     followNav = false,
     focus,
@@ -117,9 +76,6 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
   const mapRef = useRef<L.Map | null>(null);
   const tileRef = useRef<L.TileLayer[]>([]);
   const routeGroupRef = useRef<L.LayerGroup | null>(null);
-  const kursowkaGroupRef = useRef<L.LayerGroup | null>(null);
-  const signalGroupRef = useRef<L.LayerGroup | null>(null);
-  const vehicleGroupRef = useRef<L.LayerGroup | null>(null);
   const markerGroupRef = useRef<L.LayerGroup | null>(null);
   const stopGroupRef = useRef<L.LayerGroup | null>(null);
   const stopMarkersRef = useRef<Map<string, L.Marker>>(new Map());
@@ -129,23 +85,20 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
   const lastFitNonceRef = useRef(-1);
 
   const pickModeRef = useRef(pickMode);
+  pickModeRef.current = pickMode;
   const lineClickRef = useRef(onLineClick);
   const dragRef = useRef(onMarkerDrag);
   const mapClickRef = useRef(onMapClick);
   const contextMenuRef = useRef(onMapContextMenu);
   const stopClickRef = useRef(onBusStopClick);
-  const liveBusClickRef = useRef(onLiveBusClick);
+  stopClickRef.current = onBusStopClick;
+  lineClickRef.current = onLineClick;
+  dragRef.current = onMarkerDrag;
+  mapClickRef.current = onMapClick;
+  contextMenuRef.current = onMapContextMenu;
+
   const routeRef = useRef(route);
-  useEffect(() => {
-    pickModeRef.current = pickMode;
-    stopClickRef.current = onBusStopClick;
-    liveBusClickRef.current = onLiveBusClick;
-    lineClickRef.current = onLineClick;
-    dragRef.current = onMarkerDrag;
-    mapClickRef.current = onMapClick;
-    contextMenuRef.current = onMapContextMenu;
-    routeRef.current = route;
-  });
+  routeRef.current = route;
 
   const fitBounds = () => {
     const map = mapRef.current;
@@ -181,6 +134,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     },
   }));
 
+  /* Initialise the map once. */
   useEffect(() => {
     const container = containerRef.current;
     if (!container || mapRef.current) return;
@@ -193,36 +147,19 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
       zoomSnap: 0.5,
       preferCanvas: false,
     }).setView(WALBRZYCH_CENTER, WALBRZYCH_ZOOM);
+    // Exposed so automated checks can verify marker placement against the projection.
     (container as HTMLElement & { __map?: L.Map }).__map = map;
     map.attributionControl.setPrefix(
       '<a href="https://leafletjs.com" target="_blank" rel="noreferrer">Leaflet</a>'
     );
     mapRef.current = map;
-    const syncCompact = () => container.classList.toggle("live-compact", map.getZoom() < 11);
-    map.on("zoomend", syncCompact);
-    syncCompact();
-
     const labelPane = map.createPane("labels");
     labelPane.style.zIndex = "250";
     labelPane.style.pointerEvents = "none";
-
-    const kursowkaPane = map.createPane("kursowka");
-    kursowkaPane.style.zIndex = "510";
-
     const stopPane = map.createPane("stops");
     stopPane.style.zIndex = "540";
-
-    const signalPane = map.createPane("signals");
-    signalPane.style.zIndex = "550";
-
-    const vehiclePane = map.createPane("vehicles");
-    vehiclePane.style.zIndex = "680";
-
     routeGroupRef.current = L.layerGroup().addTo(map);
-    kursowkaGroupRef.current = L.layerGroup().addTo(map);
     stopGroupRef.current = L.layerGroup().addTo(map);
-    signalGroupRef.current = L.layerGroup().addTo(map);
-    vehicleGroupRef.current = L.layerGroup().addTo(map);
     markerGroupRef.current = L.layerGroup().addTo(map);
 
     map.on("click", (event: L.LeafletMouseEvent) => {
@@ -232,12 +169,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
       const original = event.originalEvent as MouseEvent | undefined;
       if (!original) return;
       L.DomEvent.stop(original);
-      contextMenuRef.current(
-        event.latlng.lat,
-        event.latlng.lng,
-        original.clientX,
-        original.clientY
-      );
+      contextMenuRef.current(event.latlng.lat, event.latlng.lng, original.clientX, original.clientY);
     });
 
     const observer = new ResizeObserver(() => map.invalidateSize({ animate: false }));
@@ -252,9 +184,6 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
       map.remove();
       mapRef.current = null;
       routeGroupRef.current = null;
-      kursowkaGroupRef.current = null;
-      signalGroupRef.current = null;
-      vehicleGroupRef.current = null;
       markerGroupRef.current = null;
       stopGroupRef.current = null;
       navMarkerRef.current = null;
@@ -262,7 +191,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     };
   }, []);
 
-  /* Base tiles + labels */
+  /* Base tiles + an independent label reference layer. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -274,7 +203,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
       maxNativeZoom: config.maxZoom,
       detectRetina: true,
       crossOrigin: true,
-      className: mapStyle === "dark" ? "basemap-layer basemap-layer--dark" : "basemap-layer",
+      className: "basemap-layer",
     });
     base.addTo(map);
     const layers = [base];
@@ -294,7 +223,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     tileRef.current = layers;
   }, [mapStyle]);
 
-  /* Active planned route */
+  /* Draw the route. */
   useEffect(() => {
     const map = mapRef.current;
     const group = routeGroupRef.current;
@@ -344,6 +273,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
 
     let suppressClick = false;
 
+    /* Pressing and dragging the line creates a new intermediate stop. */
     hitArea.on("mousedown", (event: L.LeafletMouseEvent) => {
       const mapInstance = mapRef.current;
       if (!mapInstance || !event.originalEvent || pickModeRef.current) return;
@@ -369,14 +299,18 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
         window.removeEventListener("mouseup", documentUp, true);
         mapInstance.removeLayer(ghost);
         mapInstance.dragging.enable();
-        if (latlng) lineClickRef.current([latlng.lat, latlng.lng]);
-      };
-      const move = (moveEvent: L.LeafletMouseEvent) => {
+        if (!latlng) return;
         suppressClick = true;
-        ghost.setLatLng(moveEvent.latlng);
+        window.setTimeout(() => {
+          suppressClick = false;
+        }, 320);
+        lineClickRef.current([latlng.lat, latlng.lng]);
       };
+
+      const move = (moveEvent: L.LeafletMouseEvent) => ghost.setLatLng(moveEvent.latlng);
       const up = (upEvent: L.LeafletMouseEvent) => finish(upEvent.latlng);
-      const documentUp = () => finish(null);
+      const documentUp = (documentEvent: MouseEvent) =>
+        finish(mapInstance.mouseEventToLatLng(documentEvent));
 
       mapInstance.on("mousemove", move);
       mapInstance.on("mouseup", up);
@@ -407,145 +341,24 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     }
   }, [route, mapStyle, fitNonce]);
 
-  /* GTFS Kursówka shape overlay */
-  useEffect(() => {
-    const map = mapRef.current;
-    const group = kursowkaGroupRef.current;
-    if (!map || !group) return;
-    group.clearLayers();
-    if (!kursowkaOverlay || !kursowkaOverlay.polylines.length) return;
-
-    const allPts: [number, number][] = [];
-    for (const line of kursowkaOverlay.polylines) {
-      if (line.length < 2) continue;
-      allPts.push(...line);
-      L.polyline(line, {
-        color: "#ffffff",
-        weight: 8,
-        opacity: 0.85,
-        pane: "kursowka",
-        interactive: false,
-      }).addTo(group);
-      L.polyline(line, {
-        color: kursowkaOverlay.color || "#0d4f3b",
-        weight: 4.5,
-        opacity: 0.95,
-        dashArray: "9 6",
-        pane: "kursowka",
-        interactive: false,
-      }).addTo(group);
-    }
-    if (allPts.length >= 2) {
-      map.fitBounds(L.latLngBounds(allPts), {
-        padding: [56, 56],
-        maxZoom: 15,
-        animate: true,
-      });
-    }
-  }, [kursowkaOverlay]);
-
-  /* Traffic signal intersections along route */
-  useEffect(() => {
-    const group = signalGroupRef.current;
-    if (!group) return;
-    group.clearLayers();
-    if (!showTrafficSignals || !trafficSignals.length) return;
-
-    for (const sig of trafficSignals) {
-      const icon = L.divIcon({
-        className: "pin-wrap",
-        html: `<div class="signal-badge" title="Sygnalizacja świetlna"><span class="signal-dot signal-dot--r"></span><span class="signal-dot signal-dot--y"></span><span class="signal-dot signal-dot--g"></span></div>`,
-        iconSize: [14, 24],
-        iconAnchor: [7, 12],
-      });
-      const marker = L.marker([sig.lat, sig.lon], {
-        icon,
-        pane: "signals",
-        interactive: true,
-        zIndexOffset: 320,
-      });
-      marker.bindTooltip(
-        `Sygnalizacja świetlna (${(sig.routeOffsetMeters / 1000).toFixed(2)} km trasy)`,
-        { direction: "top", offset: [0, -10], className: "waypoint-tooltip" }
-      );
-      marker.addTo(group);
-    }
-  }, [trafficSignals, showTrafficSignals]);
-
-  /* Live GPS Wałbrzych buses (MZUK, ŚKA): speed + delay / earliness chip */
-  useEffect(() => {
-    const group = vehicleGroupRef.current;
-    if (!group) return;
-    group.clearLayers();
-    if (!showLiveBuses || !liveBuses.length) return;
-
-    for (const bus of liveBuses) {
-      const selected = bus.vehicleId === selectedLiveBusId;
-      const style = DELAY_STYLES[delayTone(bus.delaySeconds)];
-      const company = OPERATOR_STYLES[bus.operatorKey] ?? OPERATOR_STYLES.other;
-      const vehNum = formatVehicleNumber(bus.vehicleId);
-      const label = bus.kursowka
-        ? `${bus.kursowka} ${vehNum}`
-        : bus.routeName
-          ? `${bus.routeName} ${vehNum}`
-          : vehNum;
-      const speedText = formatSpeed(bus.speedKmh);
-      const delayText = formatDelay(bus.delaySeconds);
-      const opLetter = bus.operatorKey === "mzuk" ? "M" : bus.operatorKey === "ska" ? "Ś" : "?";
-      const arrowHtml =
-        typeof bus.bearing === "number"
-          ? `<span class="live-bus-arrow" style="transform:rotate(${bus.bearing}deg)">▲</span>`
-          : "";
-      const html = [
-        `<div class="live-bus-wrap${selected ? " live-bus-wrap--selected" : ""}" style="--delay-bg:${style.bg};--delay-fg:${style.fg};--operator-bg:${company.bg};--operator-fg:${company.fg}">`,
-        `<div class="live-bus${selected ? " live-bus--selected" : ""}" style="--route-color:${escapeHtml(bus.routeColor || "#0d4f3b")}">`,
-        `<span class="live-bus-op live-bus-op--${bus.operatorKey}">${opLetter}</span>${arrowHtml}`,
-        `<span class="live-bus-label">${escapeHtml(label)}</span></div>`,
-        `<div class="live-bus-chip"><span>${escapeHtml(speedText)}</span>`,
-        `<span class="live-bus-delay" title="${escapeHtml(describeDelay(bus.delaySeconds))}">${escapeHtml(delayText)}</span></div></div>`,
-      ].join("");
-      const icon = L.divIcon({
-        className: "pin-wrap",
-        html,
-        iconSize: [144, 48],
-        iconAnchor: [72, 13],
-      });
-      const marker = L.marker([bus.lat, bus.lon], {
-        icon,
-        pane: "vehicles",
-        zIndexOffset: selected ? 2000 : 750,
-        riseOnHover: true,
-      });
-      marker.bindTooltip(
-        `Linia ${escapeHtml(bus.routeName)} · Kursówka ${escapeHtml(bus.kursowka || "—")} · Wóz #${escapeHtml(bus.vehicleId)} (${escapeHtml(bus.operatorName)}) · ${escapeHtml(speedText)} · ${escapeHtml(describeDelay(bus.delaySeconds))}`,
-        { direction: "top", offset: [0, -12], className: "waypoint-tooltip" }
-      );
-      marker.on("click", (event: L.LeafletMouseEvent) => {
-        L.DomEvent.stopPropagation(event.originalEvent);
-        liveBusClickRef.current?.(bus);
-      });
-      marker.addTo(group);
-    }
-  }, [liveBuses, showLiveBuses, selectedLiveBusId]);
-
-  /* Draggable waypoint pins */
+  /* Draw draggable waypoint pins. */
   useEffect(() => {
     const group = markerGroupRef.current;
     if (!group) return;
     group.clearLayers();
     const assigned = waypoints.filter(isWaypointSet);
     if (draftMode && assigned.length >= 2) {
-      L.polyline(
-        assigned.map((point) => [point.lat, point.lon] as [number, number]),
-        { color: "#5f866e", weight: 2, dashArray: "5 7", interactive: false }
-      ).addTo(group);
+      L.polyline(assigned.map((point) => [point.lat, point.lon] as [number, number]), {
+        color: "#5f866e", weight: 2, dashArray: "5 7", interactive: false,
+      }).addTo(group);
     }
 
     waypoints.forEach((waypoint, index) => {
       if (!isWaypointSet(waypoint)) return;
       const isStart = index === 0;
       const isEnd = index === waypoints.length - 1;
-      const label = isStart ? "A" : isEnd ? "B" : String(index);
+      const viaIndex = index;
+      const label = isStart ? "A" : isEnd ? "B" : String(viaIndex);
       const modifier = isStart ? "start" : isEnd ? "end" : "via";
       const icon = L.divIcon({
         className: "pin-wrap",
@@ -575,7 +388,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     });
   }, [waypoints, draftMode]);
 
-  /* Bus stops layer */
+  /* Bus stops from OpenStreetMap (Overpass): always drawn, at their exact mapped position. */
   useEffect(() => {
     const group = stopGroupRef.current;
     const map = mapRef.current;
@@ -589,40 +402,13 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     let chunk = 0;
     const CHUNK_SIZE = 90;
 
-    const stopState = (stop: BusStop) =>
-      [
-        stop.id === selectedStopId ? "on" : "",
-        nearRouteIds?.has(stop.id) ? "route" : "",
-        usedStopKeys?.has(`${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}`) ? "used" : "",
-        stop.source === "osm" ? "osm" : "",
-      ].join("|");
-
-    const stopIcon = (id: string, state: string) =>
-      L.divIcon({
-        className: "pin-wrap",
-        html: `<span class="bus-stop${state.includes("on") ? " bus-stop--on" : ""}${
-          state.includes("route") ? " bus-stop--route" : ""
-        }${state.includes("used") ? " bus-stop--used" : ""}${state.includes("osm") ? " bus-stop--osm" : ""}" data-stop-id="${escapeHtml(id)}" aria-hidden="true">${busGlyph}</span>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
-      });
-
-    const refreshLabels = () => {
-      const showNames = map.getZoom() >= 16;
-      const area = map.getBounds().pad(0.05);
-      stopMarkersRef.current.forEach((marker) => {
-        if (showNames && area.contains(marker.getLatLng())) marker.openTooltip();
-        else marker.closeTooltip();
-      });
-    };
-
+    // Chunked creation keeps the map interactive while hundreds of stops appear.
     const drawChunk = () => {
       if (cancelled) return;
       const slice = busStops.slice(chunk * CHUNK_SIZE, chunk * CHUNK_SIZE + CHUNK_SIZE);
       for (const stop of slice) {
-        const state = stopState(stop);
         const marker = L.marker([stop.lat, stop.lon], {
-          icon: stopIcon(stop.id, state),
+          icon: stopIcon(stop.id, stopState(stop)),
           pane: "stops",
           title: stop.name,
           keyboard: false,
@@ -640,13 +426,38 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
         });
         marker.addTo(group);
         stopMarkersRef.current.set(stop.id, marker);
-        stopStateRef.current.set(stop.id, state);
+        stopStateRef.current.set(stop.id, stopState(stop));
       }
       chunk += 1;
       if (chunk * CHUNK_SIZE < busStops.length) requestAnimationFrame(drawChunk);
       else refreshLabels();
     };
 
+    const stopState = (stop: BusStop) =>
+      [
+        stop.id === selectedStopId ? "on" : "",
+        nearRouteIds?.has(stop.id) ? "route" : "",
+        usedStopKeys?.has(`${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}`) ? "used" : "",
+      ].join("|");
+
+    const stopIcon = (id: string, state: string) =>
+      L.divIcon({
+        className: "pin-wrap",
+        html: `<span class="bus-stop${state.includes("on") ? " bus-stop--on" : ""}${
+          state.includes("route") ? " bus-stop--route" : ""
+        }${state.includes("used") ? " bus-stop--used" : ""}" data-stop-id="${escapeHtml(id)}" aria-hidden="true">${busGlyph}</span>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      });
+
+    const refreshLabels = () => {
+      const showNames = map.getZoom() >= 16;
+      const area = map.getBounds().pad(0.05);
+      stopMarkersRef.current.forEach((marker) => {
+        if (showNames && area.contains(marker.getLatLng())) marker.openTooltip();
+        else marker.closeTooltip();
+      });
+    };
     map.on("zoomend moveend", refreshLabels);
     drawChunk();
     return () => {
@@ -655,6 +466,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     };
   }, [busStops]);
 
+  /* Highlight state changes touch only the markers that actually changed. */
   useEffect(() => {
     if (!busStops.length) return;
     for (const stop of busStops) {
@@ -664,7 +476,6 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
         stop.id === selectedStopId ? "on" : "",
         nearRouteIds?.has(stop.id) ? "route" : "",
         usedStopKeys?.has(`${stop.lat.toFixed(5)},${stop.lon.toFixed(5)}`) ? "used" : "",
-        stop.source === "osm" ? "osm" : "",
       ].join("|");
       if (stopStateRef.current.get(stop.id) === state) continue;
       stopStateRef.current.set(stop.id, state);
@@ -673,7 +484,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
           className: "pin-wrap",
           html: `<span class="bus-stop${state.includes("on") ? " bus-stop--on" : ""}${
             state.includes("route") ? " bus-stop--route" : ""
-          }${state.includes("used") ? " bus-stop--used" : ""}${state.includes("osm") ? " bus-stop--osm" : ""}" data-stop-id="${escapeHtml(stop.id)}" aria-hidden="true">${busGlyph}</span>`,
+          }${state.includes("used") ? " bus-stop--used" : ""}" data-stop-id="${escapeHtml(stop.id)}" aria-hidden="true">${busGlyph}</span>`,
           iconSize: [22, 22],
           iconAnchor: [11, 11],
         })
@@ -682,7 +493,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     }
   }, [selectedStopId, nearRouteIds, usedStopKeys, busStops]);
 
-  /* Navigation vehicle marker */
+  /* Navigation playback marker. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -700,11 +511,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
       iconAnchor: [19, 19],
     });
     if (!navMarkerRef.current) {
-      navMarkerRef.current = L.marker(navCoord, {
-        icon,
-        zIndexOffset: 1200,
-        interactive: false,
-      }).addTo(map);
+      navMarkerRef.current = L.marker(navCoord, { icon, zIndexOffset: 1200, interactive: false }).addTo(map);
     } else {
       navMarkerRef.current.setLatLng(navCoord);
     }
@@ -718,6 +525,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
     }
   }, [navCoord, followNav]);
 
+  /* Focus a manoeuvre from the instructions drawer. */
   useEffect(() => {
     if (!focus || !mapRef.current) return;
     mapRef.current.flyTo([focus.lat, focus.lon], focus.zoom ?? 14, { duration: 0.9 });
@@ -738,7 +546,7 @@ const MapView = forwardRef<MapHandle, MapViewProps>(function MapView(
         <div className="pointer-events-none absolute inset-0 bg-[#06110c]/20" aria-hidden="true" />
       )}
       <div
-        className="pointer-events-none absolute inset-0 shadow-[inset_0_0_90px_rgba(7,35,24,0.1)] dark:shadow-[inset_0_0_24px_rgba(0,0,0,0.06)]"
+        className="pointer-events-none absolute inset-0 shadow-[inset_0_0_90px_rgba(7,35,24,0.12)] dark:shadow-[inset_0_0_100px_rgba(0,0,0,0.35)]"
         aria-hidden="true"
         data-tone={tileTone}
       />
